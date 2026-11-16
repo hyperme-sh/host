@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,14 +17,20 @@ import (
 	"github.com/FyberLabs/hypermesh-host/internal/trustedmeter"
 )
 
-type trustedStarterMock struct{ starts, stops int }
+type trustedStarterMock struct {
+	starts, stops     int
+	startErr, stopErr error
+}
 
 func (s *trustedStarterMock) Start(_ context.Context, spec runtime.Spec) (*runtime.Handle, error) {
 	s.starts++
 	hash, _ := trustedmeter.Hash(*spec.TrustedMeter)
-	return &runtime.Handle{LeaseID: spec.LeaseID, CatalogID: spec.CatalogID, Backend: runtime.BackendSNP, ContainerID: "unit-instance", State: runtime.HandleStarting, FileHash: "sha256:" + spec.TrustedMeter.ModelSHA256, TrustedMeterBindingSHA256: hash, TrustedMeterDial: "127.0.0.1:18443"}, nil
+	return &runtime.Handle{LeaseID: spec.LeaseID, CatalogID: spec.CatalogID, Backend: runtime.BackendSNP, ContainerID: "unit-instance", State: runtime.HandleStarting, FileHash: "sha256:" + spec.TrustedMeter.ModelSHA256, TrustedMeterBindingSHA256: hash, TrustedMeterDial: "127.0.0.1:18443"}, s.startErr
 }
-func (s *trustedStarterMock) Stop(context.Context, *runtime.Handle) error { s.stops++; return nil }
+func (s *trustedStarterMock) Stop(context.Context, *runtime.Handle) error {
+	s.stops++
+	return s.stopErr
+}
 func trustedAgentFixture(t *testing.T) (*Agent, api.Job, *trustedStarterMock) {
 	t.Helper()
 	dir := t.TempDir()
@@ -110,5 +117,36 @@ func TestTrustedBundleDefaultsOff(t *testing.T) {
 	t.Setenv("HYPERMESH_TRUSTED_METER_BUNDLE", "")
 	if FromEnv().TrustedMeterBundle != "" {
 		t.Fatal("unexpected activation")
+	}
+}
+
+func TestTrustedFailedStartRetainsHandleUntilCleanup(t *testing.T) {
+	for _, stopFails := range []bool{false, true} {
+		t.Run(fmt.Sprint(stopFails), func(t *testing.T) {
+			a, job, mock := trustedAgentFixture(t)
+			mock.startErr = errors.New("launch command failed")
+			if stopFails {
+				mock.stopErr = errors.New("unit state unknown")
+			}
+			if result := a.leaseStart(context.Background(), job); result.Passed || mock.stops != 1 {
+				t.Fatal(result, mock.stops)
+			}
+			h := a.localLease()
+			if stopFails {
+				if h == nil || h.State != runtime.HandleCleanupFailed {
+					t.Fatal(h)
+				}
+				other := job
+				other.LeaseID = "55555555-5555-5555-5555-555555555555"
+				binding := *job.TrustedMeter
+				binding.LeaseID = other.LeaseID
+				other.TrustedMeter = &binding
+				if result := a.leaseStart(context.Background(), other); result.Passed || mock.starts != 1 {
+					t.Fatal(result, mock.starts)
+				}
+			} else if h != nil {
+				t.Fatal(h)
+			}
+		})
 	}
 }

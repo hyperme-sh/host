@@ -81,6 +81,10 @@ func (a *Agent) leaseStartTrusted(ctx context.Context, job api.Job) pathb.Result
 	}
 	handle, err := a.trustedStarter().Start(ctx, runtime.Spec{LeaseID: job.LeaseID, CatalogID: job.CatalogID, Runtime: job.Runtime, Backend: job.Backend, GGUFPath: model, TrustedMeter: b})
 	if err != nil {
+		if handle != nil {
+			a.recordStarting(handle)
+			a.abandonStarted(ctx, handle)
+		}
 		return refused
 	}
 	a.recordStarting(handle)

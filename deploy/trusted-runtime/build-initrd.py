@@ -59,7 +59,8 @@ def build(guest, engine, template, owner_key, model_sha256, drift_ppm):
                    drift_ppm=drift_ppm)
     directories = ["dev", "etc", "etc/hypermesh-meter", "input", "journal", "proc", "run", "sys", "usr", "usr/bin"]
     entries = [(name, 0o040755, b"") for name in directories]
-    entries += [("init", 0o100500, init),
+    entries += [("etc/resolv.conf", 0o100444, b"nameserver 10.0.2.3\n"),
+                ("init", 0o100500, init),
                 ("usr/bin/hypermesh-counted-cpu", 0o100500, counted),
                 ("etc/hypermesh-meter/profile.json", 0o100400,
                  json.dumps(profile, sort_keys=True, separators=(",", ":")).encode()),

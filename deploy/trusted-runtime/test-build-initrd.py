@@ -25,6 +25,8 @@ class InitrdContract(unittest.TestCase):
             first, profile = builder.build(elf, elf, template, "a" * 64, "b" * 64, 1000)
             self.assertEqual(first, builder.build(elf, elf, template, "a" * 64, "b" * 64, 1000)[0])
             self.assertIn(b"etc/hypermesh-meter/profile.json\0", first)
+            self.assertIn(b"etc/resolv.conf\0", first)
+            self.assertIn(b"nameserver 10.0.2.3\n", first)
             self.assertEqual(profile["model_sha256"], profile["tokenizer_sha256"])
             self.assertNotIn(b"private_key", first)
             struct.pack_into("<I", raw, 64, 3)

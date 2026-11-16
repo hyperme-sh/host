@@ -44,10 +44,6 @@ func (s *SNP) Start(ctx context.Context, spec Spec) (*Handle, error) {
 	}
 	port := reserved.Addr().(*net.TCPAddr).Port
 	reserved.Close()
-	bundle, args, err := trustedmeter.PrepareLaunch(s.BundleDir, s.StateDir, *b, spec.GGUFPath, port)
-	if err != nil {
-		return nil, ErrTrustedRuntime
-	}
 	hash, err := trustedmeter.Hash(*b)
 	if err != nil {
 		return nil, ErrTrustedRuntime
@@ -56,12 +52,20 @@ func (s *SNP) Start(ctx context.Context, spec Spec) (*Handle, error) {
 	if _, err = rand.Read(instance[:]); err != nil {
 		return nil, ErrTrustedRuntime
 	}
+	// Keep a cleanup handle from the first possible staging write. A launch
+	// command can fail after creating a unit, so only Stop may remove files.
+	handle := &Handle{ContainerID: "snp-" + hex.EncodeToString(instance[:]), Name: unit, LeaseID: b.LeaseID, CatalogID: spec.CatalogID, Backend: BackendSNP, FileHash: "sha256:" + b.ModelSHA256, State: HandleStarting, TrustedMeterBindingSHA256: hash, TrustedMeterDial: net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}
+	bundle, args, err := trustedmeter.PrepareLaunch(s.BundleDir, s.StateDir, *b, spec.GGUFPath, port)
+	if err != nil {
+		return handle, ErrTrustedRuntime
+	}
+	handle.TrustedMeterBundleSHA256 = bundle.InitrdSHA256
 	command := []string{"--quiet", "--collect", "--unit=" + unit, "--property=KillMode=control-group", "--property=Restart=no", "--property=UMask=0077", "--property=LimitCORE=0", "--", "/usr/bin/qemu-system-x86_64"}
 	command = append(command, args...)
 	if _, err = s.run(ctx, "/usr/bin/systemd-run", command...); err != nil {
-		return nil, ErrTrustedRuntime
+		return handle, ErrTrustedRuntime
 	}
-	return &Handle{ContainerID: "snp-" + hex.EncodeToString(instance[:]), Name: unit, LeaseID: b.LeaseID, CatalogID: spec.CatalogID, Backend: BackendSNP, FileHash: "sha256:" + b.ModelSHA256, State: HandleStarting, TrustedMeterBindingSHA256: hash, TrustedMeterBundleSHA256: bundle.InitrdSHA256, TrustedMeterDial: net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}, nil
+	return handle, nil
 }
 func (s *SNP) Stop(ctx context.Context, h *Handle) error {
 	if h == nil || h.Backend != BackendSNP {

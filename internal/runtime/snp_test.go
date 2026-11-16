@@ -128,6 +128,35 @@ func TestSNPStartUsesOnlyFixedConfidentialLaunch(t *testing.T) {
 	if _, err = s.Start(context.Background(), spec); err == nil {
 		t.Fatal("duplicate active unit accepted")
 	}
+	for _, phase := range []string{"staging", "launch"} {
+		t.Run(phase, func(t *testing.T) {
+			if phase == "staging" {
+				if err := os.WriteFile(filepath.Join(dir, "kernel"), []byte("wrong bytes"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s.Run = func(_ context.Context, name string, args ...string) ([]byte, error) {
+				if name == "/usr/bin/systemctl" && args[0] == "stop" {
+					return nil, nil
+				}
+				return nil, errors.New("command failed")
+			}
+			failed, err := s.Start(context.Background(), spec)
+			if err == nil || failed == nil || failed.ContainerID == "" {
+				t.Fatal(failed, err)
+			}
+			if err := s.Stop(context.Background(), failed); err != nil {
+				t.Fatal(err)
+			}
+			root, _ := trustedmeter.LeaseDirectory(state, b.LeaseID)
+			if _, err := os.Stat(root); !os.IsNotExist(err) {
+				t.Fatal("failed launch files retained", err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "kernel"), raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func TestSNPCollectedUnitCleanupRequiresConfirmedStoppedState(t *testing.T) {
