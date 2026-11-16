@@ -5,6 +5,9 @@ import subprocess
 from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('promote',Path(__file__).with_name('promote-main.py'))
 p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
+OLD_REPO = 'hyperme-sh/hypermesh-host'
+NEW_REPO = 'hyperme-sh/host'
+
 class PromotionTests(unittest.TestCase):
     def test_test_only_publication_binds_the_approved_main_source(self):
         revision='a'*40
@@ -35,33 +38,34 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(p.choose_tag({'v1.2.9':'a','v1.2.10':'a'}),('v1.2.11',True))
     def test_other_branches_cannot_create_release(self):
         with patch.object(p,'api') as api, self.assertRaises(ValueError):
-            p.promote(dict(GITHUB_REPOSITORY=p.REPO,GITHUB_REF='refs/heads/feature',GITHUB_SHA='a'*40))
+            p.promote(dict(GITHUB_REPOSITORY=OLD_REPO, GITHUB_REPOSITORY_ID=p.REPOSITORY_ID,GITHUB_REF='refs/heads/feature',GITHUB_SHA='a'*40))
         api.assert_not_called()
     def test_superseded_main_does_not_dispatch_old_code(self):
         with patch.object(p,'api',return_value={'sha':'b'*40}),patch.object(p,'run') as run:
-            p.promote(dict(GITHUB_REPOSITORY=p.REPO,GITHUB_REF='refs/heads/main',GITHUB_SHA='a'*40))
+            p.promote(dict(GITHUB_REPOSITORY=OLD_REPO, GITHUB_REPOSITORY_ID=p.REPOSITORY_ID,GITHUB_REF='refs/heads/main',GITHUB_SHA='a'*40))
         run.assert_not_called()
     def test_tag_creation_failure_never_dispatches(self):
-        env=dict(GITHUB_REPOSITORY=p.REPO,GITHUB_REF='refs/heads/main',GITHUB_SHA='a'*40)
+        env=dict(GITHUB_REPOSITORY=OLD_REPO, GITHUB_REPOSITORY_ID=p.REPOSITORY_ID,GITHUB_REF='refs/heads/main',GITHUB_SHA='a'*40)
         with patch.object(p,'api',side_effect=[{'sha':'a'*40},{'sha':'a'*40},RuntimeError('tag already exists')]),patch.object(p,'wait_for_ci'),patch.object(p,'run',return_value='[[]]') as run:
             with self.assertRaises(RuntimeError):p.promote(env)
         self.assertEqual(run.call_count,1)
     def test_current_green_main_creates_tag_and_dispatches_tag_workflow(self):
-        env=dict(GITHUB_REPOSITORY=p.REPO,GITHUB_REF='refs/heads/main',GITHUB_SHA='a'*40)
+        env=dict(GITHUB_REPOSITORY=OLD_REPO, GITHUB_REPOSITORY_ID=p.REPOSITORY_ID,GITHUB_REF='refs/heads/main',GITHUB_SHA='a'*40)
         with patch.object(p,'api',side_effect=[{'sha':'a'*40},{'sha':'a'*40},{}]) as api, patch.object(p,'wait_for_ci'), patch.object(p,'run',side_effect=['[[]]','']) as run:
             p.promote(env)
-        self.assertEqual(api.call_args.args,('git/refs',dict(ref='refs/tags/v0.1.0',sha='a'*40)))
-        self.assertEqual(run.call_args.args,('gh','workflow','run','release.yml','--repo',p.REPO,'--ref','v0.1.0'))
+        self.assertEqual(api.call_args.args,(OLD_REPO, 'git/refs',dict(ref='refs/tags/v0.1.0',sha='a'*40)))
+        self.assertEqual(run.call_args.args,('gh','workflow','run','release.yml','--repo',OLD_REPO,'--ref','v0.1.0'))
     def test_failed_main_ci_cannot_promote(self):
         run=dict(id=1,head_sha='a'*40,head_branch='main',event='push',status='completed',conclusion='failure')
         with patch.object(p,'api',return_value=dict(workflow_runs=[run])),self.assertRaises(ValueError):
-            p.wait_for_ci('a'*40)
+            p.wait_for_ci(OLD_REPO, 'a'*40)
     def test_successful_main_ci_is_accepted(self):
         run=dict(id=1,head_sha='a'*40,head_branch='main',event='push',status='completed',conclusion='success')
         with patch.object(p,'api',return_value=dict(workflow_runs=[run])):
-            p.wait_for_ci('a'*40)
+            p.wait_for_ci(OLD_REPO, 'a'*40)
     def test_repository_pin_is_this_github_repository(self):
-        self.assertEqual(p.REPO,'hyperme-sh/hypermesh-host')
+        self.assertEqual(p.REPOSITORIES, {OLD_REPO, NEW_REPO})
+        self.assertEqual(p.REPOSITORY_ID, '1342412321')
         root=Path(__file__).resolve().parents[2]
         old='FyberLabs/hypermesh-host'
         module='github.com/'+old
@@ -81,13 +85,21 @@ class PromotionTests(unittest.TestCase):
             self.assertIn('repo:hyperme-sh/hypermesh-host:ref:refs/tags/v*',text,rel)
     def test_previous_org_cannot_promote(self):
         with patch.object(p,'api') as api,self.assertRaises(ValueError) as raised:
-            p.promote(dict(GITHUB_REPOSITORY='FyberLabs/hypermesh-host',GITHUB_REF='refs/heads/main',GITHUB_SHA='a'*40))
+            p.promote(dict(GITHUB_REPOSITORY='FyberLabs/hypermesh-host', GITHUB_REPOSITORY_ID=p.REPOSITORY_ID,GITHUB_REF='refs/heads/main',GITHUB_SHA='a'*40))
         api.assert_not_called()
         self.assertEqual(str(raised.exception),'automatic release requires this repository main commit')
-    def test_this_repository_main_commit_passes_the_org_gate(self):
-        env=dict(GITHUB_REPOSITORY='hyperme-sh/hypermesh-host',GITHUB_REF='refs/heads/main',GITHUB_SHA='a'*40)
-        with patch.object(p,'api',return_value={'sha':'b'*40}) as api,patch.object(p,'run') as run:
-            p.promote(env)
-        api.assert_called_once_with('commits/main')
-        run.assert_not_called()
+    def test_both_repository_names_require_the_host_id(self):
+        for repository in (OLD_REPO, NEW_REPO):
+            with self.subTest(repository=repository), patch.object(p, 'api', return_value={'sha': 'b' * 40}) as api, patch.object(p, 'run') as run:
+                env = dict(GITHUB_REPOSITORY=repository, GITHUB_REPOSITORY_ID=p.REPOSITORY_ID,
+                           GITHUB_REF='refs/heads/main', GITHUB_SHA='a' * 40)
+                p.promote(env)
+                api.assert_called_once_with(repository, 'commits/main')
+                run.assert_not_called()
+
+                api.reset_mock()
+                env['GITHUB_REPOSITORY_ID'] = '1'
+                with self.assertRaises(ValueError):
+                    p.promote(env)
+                api.assert_not_called()
 if __name__=='__main__' :unittest.main()
