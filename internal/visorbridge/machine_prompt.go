@@ -87,6 +87,12 @@ func (b *Bridge) machine(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(fact)
 		return
 	}
+	// The shared bridge keeps a short default for other operations. This one
+	// must retain its response channel through the bounded model turn.
+	if http.NewResponseController(w).SetWriteDeadline(time.Now().Add(320*time.Second)) != nil {
+		fail()
+		return
+	}
 	raw, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 512<<10))
 	if e != nil {
 		fail()

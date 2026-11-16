@@ -8,8 +8,18 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
+type promptRecorder struct {
+	*httptest.ResponseRecorder
+	deadline time.Time
+}
+
+func (p *promptRecorder) SetWriteDeadline(deadline time.Time) error {
+	p.deadline = deadline
+	return nil
+}
 func TestMachinePromptKeepsOwnerBytesAndConfiguredRoute(t *testing.T) {
 	b, _, _, _ := fixture(t)
 	b.config.Tenant = uuid.NewString()
@@ -41,9 +51,12 @@ func TestMachinePromptKeepsOwnerBytesAndConfiguredRoute(t *testing.T) {
 	request := func(input string, uid uint32) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "/machine-prompt", strings.NewReader(input))
 		r = r.WithContext(context.WithValue(r.Context(), peerKey{}, uid))
-		w := httptest.NewRecorder()
+		w := &promptRecorder{ResponseRecorder: httptest.NewRecorder()}
 		b.Handler().ServeHTTP(w, r)
-		return w
+		if w.Code == 200 && time.Until(w.deadline) < 315*time.Second {
+			t.Fatal("response deadline too short")
+		}
+		return w.ResponseRecorder
 	}
 	if w := request(string(raw), 1001); w.Code != 200 || strings.Contains(w.Body.String(), "hm_msi_") {
 		t.Fatal(w.Code)
