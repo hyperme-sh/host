@@ -37,18 +37,19 @@ type Call struct {
 }
 
 type Config struct {
-	Schema         int       `json:"schema"`
-	ClientUID      uint32    `json:"client_uid"`
-	Socket         string    `json:"socket"`
-	Conductor      string    `json:"conductor"`
-	AuthorityURL   string    `json:"authority_url"`
-	DispatchConfig string    `json:"dispatch_config"`
-	Base           string    `json:"base"`
-	Tenant         string    `json:"tenant"`
-	Device         string    `json:"device"`
-	Identity       string    `json:"identity"`
-	WireGuardKey   string    `json:"wireguard_key,omitempty"`
-	Enabled        []Binding `json:"enabled"`
+	Schema            int             `json:"schema"`
+	ClientUID         uint32          `json:"client_uid"`
+	Socket            string          `json:"socket"`
+	Conductor         string          `json:"conductor"`
+	AuthorityURL      string          `json:"authority_url"`
+	DispatchConfig    string          `json:"dispatch_config"`
+	Base              string          `json:"base"`
+	Tenant            string          `json:"tenant"`
+	Device            string          `json:"device"`
+	Identity          string          `json:"identity"`
+	WireGuardKey      string          `json:"wireguard_key,omitempty"`
+	Enabled           []Binding       `json:"enabled"`
+	PermissionPreview *PreviewBinding `json:"permission_preview,omitempty"`
 }
 
 type Result struct {
@@ -64,6 +65,7 @@ type reviewer func(context.Context, []byte) ([]byte, error)
 
 type Bridge struct {
 	config        Config
+	credential    func(context.Context) (string, error)
 	sign          signer
 	review        reviewer
 	now           func() time.Time
@@ -90,6 +92,9 @@ func New(config Config) (*Bridge, error) {
 	config.Enabled = append([]Binding(nil), config.Enabled...)
 	provider := machineidentity.Provider{Path: config.Identity}
 	b := &Bridge{config: config, now: time.Now, busy: make(chan struct{}, 8), dispatchSlots: make(chan struct{}, 4)}
+	b.credential = func(ctx context.Context) (string, error) {
+		return provider.ExistingToken(ctx, config.Base, config.Tenant, config.Device, "")
+	}
 	b.sign = func(ctx context.Context, call machineidentity.CapabilityCall) ([]byte, error) {
 		return provider.SignCapability(ctx, config.Base, config.Tenant, config.Device, config.WireGuardKey, call)
 	}
@@ -98,6 +103,11 @@ func New(config Config) (*Bridge, error) {
 			return nil, refused
 		}
 		args := []string{action, "--config", config.DispatchConfig}
+		if action == "permission-preview" {
+			endpoint, _ := url.Parse(config.AuthorityURL)
+			endpoint.Path = "/api/v1/aiuditor/access/preview"
+			args = []string{action, "--plane", config.Base, "--authority", endpoint.String()}
+		}
 		if action == "capability-review" {
 			args = []string{action, "--endpoint", config.AuthorityURL}
 		}
@@ -247,6 +257,18 @@ func (b *Bridge) Handler() http.Handler {
 				return
 			}
 			json.NewEncoder(w).Encode(result)
+			return
+		}
+		if r.URL.Path == "/permission-context" && r.Method == "GET" {
+			if b.config.PermissionPreview == nil || !b.config.PermissionPreview.valid() {
+				http.Error(w, "Permission preview unavailable", 503)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"version": 1, "configured_only": true, "tenant_id": b.config.Tenant, "device_id": b.config.Device, "binding": b.config.PermissionPreview})
+			return
+		}
+		if r.URL.Path == "/permission-preview" && r.Method == "POST" {
+			b.preview(w, r)
 			return
 		}
 		action := ""
