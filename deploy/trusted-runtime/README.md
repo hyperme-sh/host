@@ -1,11 +1,13 @@
 # Trusted CPU token meter implementation
 
 Tracking: [Host #216](https://github.com/hyperme-sh/hypermesh-host/issues/216).
-Owner prerequisite: [Plane #155](https://github.com/hyperme-sh/hypermesh-plane/pull/155),
-which adds signed grant issuance times and nonce-bound requests.
+Owner prerequisites: [Plane #155](https://github.com/hyperme-sh/hypermesh-plane/pull/155),
+[#158](https://github.com/hyperme-sh/hypermesh-plane/pull/158), and
+[#160](https://github.com/hyperme-sh/hypermesh-plane/pull/160) supply grant timing,
+fresh key-bound channels, and explicit trusted Host dispatch.
 
-This directory is an implementation under development. It is not installed by
-Host setup, selected by the ordinary CPU runtime, or enabled for billing.
+This profile is opt-in and default-off. Host setup does not install a guest
+bundle, and the ordinary CPU runtime does not select this profile.
 The ordinary Docker runtime cannot satisfy the confidential execution boundary.
 
 ## Counter and wire contract
@@ -46,25 +48,66 @@ A local terminal record still needs its matching Plane anchor for settlement.
 Missing terminal records do not imply zero work. No private key, prompt, output,
 token ID, or prompt hash is stored in the journal.
 
-## Remaining source requirements before Host #216 can close
+## Guest, channel and Host contract
 
-- Measured confidential guest boot and immutable workload loading. Hashing files
-  on an ordinary host does not establish the required boundary. The supervisor,
-  kernel, libraries, template policy, and model loading path must be covered by
-  the approved profile. Provider-writable model files are not acceptable.
-- Qualification of the Linux Secure TSC adapter against the measured kernel,
-  including pause, drift, and rollback behavior. It rejects SNP without Secure
-  TSC and non-TSC clock sources, and has no wall-time fallback. These local
-  checks are not independent platform verification.
-- Wire the guest key/quote implementation into the measured boot path and
-  independent verifier challenge exchange. The code generates an ephemeral
-  Ed25519 key in memory and uses the real SNP device at VMPL 0. It binds the
-  quote to the key, full statement, nonce and workload. Only the independent
-  verifier can validate vendor trust, current policy and approved measurement.
-- Authenticated Gateway TLS terminating inside the guest, binding the complete
-  inference body and limits to the admitted request; scoped status/final APIs.
-- Host launch and shutdown wiring with no ordinary CPU fallback, plus unit and
-  contract tests of the complete guest path.
+The static `hypermesh-meter-guest` binary is PID 1 in a minimal initrd. It
+requires a built-in SNP/Secure TSC kernel and rejects modules, suspend, swap,
+user namespaces and debug interfaces. There is no shell, dynamic loader,
+provider-supplied trust root or key export. The counted worker runs as UID 65534
+in separate network, PID, IPC and UTS namespaces with no new privileges.
+Only private pipes and sealed model/template/binary file descriptors reach it.
+The guest copies and hashes model data into sealed memory before accepting work;
+changes to the provider's exported model cannot alter those bytes.
+
+TLS 1.3 terminates in the guest using the ephemeral attested Ed25519 key.
+`POST /channels/challenge` accepts a Gateway key; `/channels/authorize` consumes
+the fresh Plane-signed key binding once. The resulting short-lived channel
+requires proof of that same TLS client key and the channel token. Certificate
+wall-clock dates do not authorize it. Authenticated `POST /quote`, `/status`
+and `/execute` bind the complete lease and request. Execution relays owner
+operations only over HTTPS pinned to the authorized Gateway key. Admission is
+separate from the durable start decision and short protected-clock grants.
+
+Status returns count-only signed history. Execute accepts bounded messages and
+limits, buffers output transiently, and returns it only after the terminal
+count is anchored. The journal never resumes a reopened request. A new guest
+can serve an earlier public key's signed records, but cannot renew that session.
+
+Host dispatch requires `runtime` and `backend` equal to `sev-snp-cpu`, the full
+`trusted_meter` binding, and `HYPERMESH_TRUSTED_METER_BUNDLE` pointing to a
+configured bundle directory. Missing configuration, changed scope, private
+model sources, unsupported platforms or failed launch refuse the job. There
+is no ordinary runtime fallback. Host forwards opaque TCP through the existing
+tunnel; a listening socket is not attestation. Gateway must verify the quote
+and owner authority before sending inference. Shutdown stops the dedicated
+systemd unit and removes staged boot/input files while retaining count history.
+
+## Preparing a profile
+
+Build the static Go init with `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build
+-trimpath -o meter-init ./cmd/hypermesh-meter-guest`. Build the CPU engine against
+the exact source revision in `engine/source.json`; CMake disables dynamic
+backends and emits a static PIE. `build-initrd.py --help` describes the explicit
+owner public key, model digest, fixed template and qualified clock allowance.
+The deterministic archive builder rejects dynamically linked binaries. Its
+artifact manifest deliberately has no approved measurement.
+
+Infra supplies `firmware.fd`, `kernel`, `initrd.cpio` and `bundle.json`. The bundle
+has schema 1, the generated `profile`, independently approved `measurement`,
+SHA-256 fields `firmware_sha256`, `kernel_sha256`, `initrd_sha256`, plus
+`cbitpos`, `reduced_phys_bits`, `memory_mib` and `tsc_frequency_khz`. The selected
+profile must cover the exact kernel, initrd, command line, one-vCPU configuration
+and Secure TSC rate. `kernel.go` defines required and forbidden kernel options;
+all required drivers are built in. Memory includes both the private model copy
+and CPU allocation, with 2 GiB additional allowance. Kernel/firmware support and
+QEMU Secure TSC properties are mandatory; failed startup never downgrades them.
+
+The Host launch fixes SNP policy to `0x30000` (no debug or migration), uses
+stateless firmware with `kernel-hashes=on`, disables monitor/serial access,
+and supplies `GuestCommandLine` from `bundle.go` unchanged. QEMU needs the
+`secure-tsc` and `tsc-frequency` properties documented in its 11.1 interface.
+These artifact hashes describe the confidential workload, not peer service
+version requirements or service deployment pins.
 
 Do not persist a guest private key merely to serve historical final records.
 Recovery can return the original signed records and public key for verification
@@ -73,15 +116,17 @@ execute an old request.
 
 Independent verifier configuration, approved measurements, vendor policy, and
 scheduled qualification are tracked in
-[Infra #1638](https://github.com/FyberLabs/infra/issues/1638). Those configuration
-steps do not replace the unfinished source requirements above. Gateway #70 and
+[Infra #1638](https://github.com/FyberLabs/infra/issues/1638). That work must independently verify the workload measurement, vendor chain,
+chip/host assignment, Secure TSC pause/rollback behavior and clock rate. Source
+checks cannot establish platform qualification. Gateway #70 and
 #69 remain downstream. Digest billing stays disabled.
 
 ## Unit and contract validation
 
 `go test -race ./internal/trustedmeter` checks the wire fixture produced by
 Plane's Python signer, owner grants, replay/expiry/rollback handling, budgets,
-journal restart, and file digests. `counter-contract` checks the isolated C++
+journal restart, key-bound channels, sealed files, launch staging, shutdown,
+and file digests. Agent unit checks cover default-off dispatch and retry scope. `counter-contract` checks the isolated C++
 count hook and failed decode behavior. The CI engine job builds the pinned CPU
 source without downloading a model or running inference.
 
@@ -96,3 +141,6 @@ Quote collection uses [go-sev-guest v0.15.0](https://github.com/google/go-sev-gu
 Its [key derivation limitations](https://github.com/google/go-sev-guest/blob/v0.15.0/LIMITATIONS.md)
 explain why a generic firmware measurement does not identify a workload. This
 implementation does not derive or seal a key under a generic VM measurement.
+
+Boot settings follow the [QEMU AMD memory encryption contract](https://www.qemu.org/docs/master/system/i386/amd-memory-encryption.html)
+and [Secure TSC guest properties](https://github.com/qemu/qemu/blob/master/qapi/qom.json).

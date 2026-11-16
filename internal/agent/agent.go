@@ -28,6 +28,7 @@ import (
 
 // Agent is the host process.
 type Agent struct {
+	trusted runtime.Starter
 	// certEndpoint is a test seam; production certification always uses loopback.
 	certContextTokens int // nonzero only for an explicitly approved full-context check
 	certEndpoint string
@@ -1151,6 +1152,9 @@ func (a *Agent) leaseStart(ctx context.Context, job api.Job) pathb.Result {
 		a.log.Info("lease_start refused", "reason", SupervisorLeaseRefuse, "host_type", HostTypeSupervisor)
 		return pathb.Result{Passed: false, Reason: SupervisorLeaseRefuse}
 	}
+	if job.TrustedMeter != nil || job.Backend == runtime.BackendSNP || job.Runtime == runtime.BackendSNP {
+		return a.leaseStartTrusted(ctx, job)
+	}
 	if res, stub := a.backendStub(job); stub {
 		return res
 	}
@@ -1406,6 +1410,9 @@ func (a *Agent) starterFor(path runtime.Path) runtime.Starter {
 }
 
 func (a *Agent) stopHandle(ctx context.Context, h *runtime.Handle) error {
+	if h != nil && h.Backend == runtime.BackendSNP {
+		return a.trustedStarter().Stop(ctx, h)
+	}
 	path, _ := runtime.ResolveBackend("")
 	if h != nil && strings.TrimSpace(h.Backend) != "" {
 		path, _ = runtime.ResolveBackend(h.Backend)

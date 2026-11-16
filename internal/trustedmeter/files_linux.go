@@ -16,7 +16,7 @@ func SealFile(source *os.File, expected string, maxBytes int64) (*os.File, error
 	if source == nil || !digestPattern.MatchString(expected) || maxBytes < 1 || maxBytes > 8<<30 {
 		return nil, ErrInvalid
 	}
-	fd, err := unix.MemfdCreate("hypermesh-meter", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
+	fd, err := unix.MemfdCreate("hypermesh-meter", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING|unix.MFD_EXEC)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +35,7 @@ func SealFile(source *os.File, expected string, maxBytes int64) (*os.File, error
 	if n < 1 || n > maxBytes || hex.EncodeToString(hash.Sum(nil)) != expected {
 		return nil, ErrInvalid
 	}
-	if err = target.Chmod(0500); err != nil {
+	if err = target.Chmod(0555); err != nil {
 		return nil, err
 	}
 	if _, err = unix.FcntlInt(target.Fd(), unix.F_ADD_SEALS, unix.F_SEAL_WRITE|unix.F_SEAL_GROW|unix.F_SEAL_SHRINK|unix.F_SEAL_SEAL); err != nil {

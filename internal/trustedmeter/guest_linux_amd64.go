@@ -79,7 +79,7 @@ func (g *Guest) quote(data [64]byte) ([]byte, error) {
 	if err != nil {
 		return nil, ErrInvalid
 	}
-	if report.GetVmpl() != 0 || report.GetPolicy()&(1<<19) != 0 || hex.EncodeToString(report.GetMeasurement()) != g.binding.Measurement || hex.EncodeToString(report.GetReportData()) != hex.EncodeToString(data[:]) {
+	if report.GetVmpl() != 0 || report.GetPolicy()&(1<<18|1<<19) != 0 || hex.EncodeToString(report.GetMeasurement()) != g.binding.Measurement || hex.EncodeToString(report.GetReportData()) != hex.EncodeToString(data[:]) {
 		return nil, ErrDisputed
 	}
 	return raw, nil

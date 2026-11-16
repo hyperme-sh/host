@@ -87,7 +87,7 @@ echo '{"event":"completed"}'
 	c.journal.data.Binding = c.binding
 	owner.advanceCheckpoint = 20 * time.Second
 	var out bytes.Buffer
-	if err := RunCPU(context.Background(), c, files, []byte(`{"messages":[],"max_tokens":1}`), &out); err != nil {
+	if err := runCPU(context.Background(), c, files, []byte(`{"messages":[],"max_tokens":1}`), &out, false); err != nil {
 		t.Fatal(err)
 	}
 	if out.String() != "hi" {

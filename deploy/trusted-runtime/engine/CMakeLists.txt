@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 project(hypermesh_counted_cpu LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 # The caller supplies a checkout verified against source.json before configuring.
 if(NOT DEFINED LLAMA_SOURCE)
   message(FATAL_ERROR "LLAMA_SOURCE is required")
@@ -11,6 +14,12 @@ set(GGML_METAL OFF CACHE BOOL "" FORCE)
 set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
 set(GGML_SYCL OFF CACHE BOOL "" FORCE)
 set(GGML_OPENCL OFF CACHE BOOL "" FORCE)
+set(GGML_HIP OFF CACHE BOOL "" FORCE)
+set(GGML_RPC OFF CACHE BOOL "" FORCE)
+set(GGML_BLAS OFF CACHE BOOL "" FORCE)
+set(GGML_CANN OFF CACHE BOOL "" FORCE)
+set(GGML_MUSA OFF CACHE BOOL "" FORCE)
+set(GGML_WEBGPU OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
@@ -24,3 +33,6 @@ add_executable(counter-contract counter_test.cpp)
 
 # Keep contract assertions active in Release builds.
 target_compile_options(counter-contract PRIVATE -UNDEBUG)
+
+# The measured initrd contains no dynamic loader or external backend libraries.
+target_link_options(hypermesh-counted-cpu PRIVATE -static-pie)

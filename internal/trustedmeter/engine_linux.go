@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"syscall"
 )
 
 // EngineFiles must refer to immutable files inside the measured guest, not
@@ -54,7 +55,16 @@ func (files EngineFiles) Verify(b Binding) error {
 // RunCPU consumes only the private pipe of the measured engine. Output is
 // released after its cumulative count is durable and anchored. This function
 // must run inside the guest; file hashing alone does not establish that trust.
-func RunCPU(ctx context.Context, c *Controller, files EngineFiles, request []byte, output io.Writer) (err error) {
+func RunCPU(ctx context.Context, c *Controller, files EngineFiles, request []byte, output io.Writer) error {
+	if os.Geteuid() != 0 {
+		c.Dispute()
+		return ErrDisputed
+	}
+	return runCPU(ctx, c, files, request, output, true)
+}
+
+// The unprivileged variant is used only by the mock pipe unit contract.
+func runCPU(ctx context.Context, c *Controller, files EngineFiles, request []byte, output io.Writer, isolate bool) (err error) {
 	defer func() {
 		if err != nil {
 			c.Dispute()
@@ -76,6 +86,9 @@ func RunCPU(ctx context.Context, c *Controller, files EngineFiles, request []byt
 		return err
 	}
 	cmd := exec.CommandContext(ctx, "/proc/self/fd/3", "/proc/self/fd/4", "/proc/self/fd/5")
+	if isolate {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534, NoSetGroups: false}, Cloneflags: syscall.CLONE_NEWNET | syscall.CLONE_NEWIPC | syscall.CLONE_NEWUTS | syscall.CLONE_NEWPID, Pdeathsig: syscall.SIGKILL}
+	}
 	cmd.ExtraFiles = []*os.File{files.Binary, files.Model, files.Template}
 	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
 	input, err := cmd.StdinPipe()

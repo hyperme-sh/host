@@ -176,6 +176,9 @@ func (a *Agent) modelSettings(job api.Job) (jinja, contextTokens, timeout string
 // authorizeLeaseRetry checks the persisted workload, even if a retry drops its
 // private source reference. Never acknowledge changed or unproven private state.
 func (a *Agent) authorizeLeaseRetry(ctx context.Context, job api.Job, existing *runtime.Handle) error {
+	if existing.Backend == runtime.BackendSNP {
+		return runtime.ErrTrustedRuntime
+	}
 	incomingPrivate := strings.HasPrefix(job.SourceRef, privateModelPrefix)
 	if existing.PrivateRevisionID == "" && !incomingPrivate {
 		return nil
