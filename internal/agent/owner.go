@@ -191,6 +191,7 @@ func (a *Agent) startOwner(ctx context.Context) error {
 func (a *Agent) ownerHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v0/status", a.handleOwnerStatus)
+ mux.HandleFunc("/v0/health_authorization", a.handleHealthAuthorization)
  mux.HandleFunc("/v0/maintenance",a.handleOwnerMaintenance)
 	mux.HandleFunc("/v0/console", a.handleOwnerConsole)
 	mux.HandleFunc("/", a.handleOwnerConsole)
