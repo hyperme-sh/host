@@ -27,6 +27,8 @@ func (p PreviewBinding) valid() bool {
 }
 
 type previewRequest struct {
+	RequestID       string          `json:"request_id,omitempty"`
+	ExpectedPolicy  string          `json:"expected_policy_revision,omitempty"`
 	Project         string          `json:"project"`
 	TemplateVersion int             `json:"template_version"`
 	Template        json.RawMessage `json:"template"`
@@ -34,6 +36,9 @@ type previewRequest struct {
 }
 
 func (b *Bridge) preview(w http.ResponseWriter, r *http.Request) {
+	b.accessReview(w, r, false)
+}
+func (b *Bridge) accessReview(w http.ResponseWriter, r *http.Request, active bool) {
 	w.Header().Set("Cache-Control", "no-store")
 	fail := func() { http.Error(w, "Permission preview unavailable", 503) }
 	binding := b.config.PermissionPreview
@@ -58,6 +63,16 @@ func (b *Bridge) preview(w http.ResponseWriter, r *http.Request) {
 		fail()
 		return
 	}
+	if active {
+		machine := b.config.MachinePrompt
+		if machine == nil || !machine.valid() || machine.PreviewBinding != *binding || machine.Workspace != body.Project || !nonzeroID(body.RequestID) || body.ExpectedPolicy != "" && !nonzeroID(body.ExpectedPolicy) {
+			fail()
+			return
+		}
+	} else if body.RequestID != "" || body.ExpectedPolicy != "" {
+		fail()
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	token, e := b.credential(ctx)
@@ -66,11 +81,19 @@ func (b *Bridge) preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nonce := uuid.NewString()
+	action := "permission-preview"
+	if active {
+		nonce = body.RequestID
+		action = "permission-read-review"
+	}
 	payload := map[string]any{"version": 1, "request_id": nonce, "tenant_id": b.config.Tenant, "device_id": b.config.Device, "bot_id": binding.Bot, "assignment_id": binding.Assignment, "session_id": binding.Session, "project": body.Project, "template_version": 1, "template": body.Template, "action": body.Action}
+	if active && body.ExpectedPolicy != "" {
+		payload["expected_policy_revision"] = body.ExpectedPolicy
+	}
 	envelope, _ := json.Marshal(map[string]any{"credential": token, "preview": payload})
 	// Only the trusted Conductor child receives the short-lived credential over
 	// stdin; it is never returned to the Visor account, logged or placed in argv.
-	result, e := b.command(ctx, "permission-preview", envelope, 16384)
+	result, e := b.command(ctx, action, envelope, 16384)
 	if e != nil {
 		fail()
 		return
@@ -81,7 +104,7 @@ func (b *Bridge) preview(w http.ResponseWriter, r *http.Request) {
 		PreviewOnly bool              `json:"preview_only"`
 		Identity    map[string]string `json:"identity"`
 	}
-	if len(result) > 16384 || json.Unmarshal(result, &response) != nil || response.Version != 1 || response.RequestID != nonce || !response.PreviewOnly {
+	if len(result) > 16384 || json.Unmarshal(result, &response) != nil || response.Version != 1 || response.RequestID != nonce || response.PreviewOnly == active {
 		fail()
 		return
 	}
