@@ -1,9 +1,9 @@
 # Trusted CPU token meter implementation
 
 Tracking: [Host #216](https://github.com/hyperme-sh/hypermesh-host/issues/216).
-Owner prerequisites: [Plane #155](https://github.com/hyperme-sh/hypermesh-plane/pull/155),
-[#158](https://github.com/hyperme-sh/hypermesh-plane/pull/158), and
-[#160](https://github.com/hyperme-sh/hypermesh-plane/pull/160) supply grant timing,
+Owner prerequisites: [Plane #155](https://github.com/hyperme-sh/plane/pull/155),
+[#158](https://github.com/hyperme-sh/plane/pull/158), and
+[#160](https://github.com/hyperme-sh/plane/pull/160) supply grant timing,
 fresh key-bound channels, and explicit trusted Host dispatch.
 
 This profile is opt-in and default-off. Host setup does not install a guest
