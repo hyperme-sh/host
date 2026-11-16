@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -172,5 +174,30 @@ func TestHistoricalRecoveryProofBindsOriginalKeyAndTerminal(t *testing.T) {
 	}
 	if err = s.retireHistory(request); err != nil {
 		t.Fatal("lost acknowledgement", err)
+	}
+}
+
+// A client body reader must never run while retirement holds execution.
+type lockCheckingBody struct {
+	t      *testing.T
+	server *Server
+}
+
+func (b lockCheckingBody) Read(p []byte) (int, error) {
+	if !b.server.execution.TryLock() {
+		b.t.Fatal("unauthenticated body holds execution lock")
+	}
+	b.server.execution.Unlock()
+	return 0, io.EOF
+}
+func (b lockCheckingBody) Close() error { return nil }
+func TestRetirementReadsBeforeExecutionLock(t *testing.T) {
+	s := &Server{}
+	request := httptest.NewRequest("POST", "/retire", nil)
+	request.Body = lockCheckingBody{t, s}
+	response := httptest.NewRecorder()
+	s.retire(response, request)
+	if response.Code != 400 {
+		t.Fatal(response.Code)
 	}
 }

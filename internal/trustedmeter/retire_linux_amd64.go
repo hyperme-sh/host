@@ -18,11 +18,6 @@ type retirement struct {
 // Signed owner recovery, cancellation or durable dispute archival permits
 // local deletion. Plane retains history and permanent replay authority.
 func (s *Server) retire(w http.ResponseWriter, r *http.Request) {
-	if !s.execution.TryLock() {
-		refuse(w, 409)
-		return
-	}
-	defer s.execution.Unlock()
 	raw, err := readBody(r, 16384)
 	var request retirement
 	if err != nil || strict(raw, &request) != nil {
@@ -34,6 +29,11 @@ func (s *Server) retire(w http.ResponseWriter, r *http.Request) {
 		refuse(w, 403)
 		return
 	}
+	if !s.execution.TryLock() {
+		refuse(w, 409)
+		return
+	}
+	defer s.execution.Unlock()
 	if err = s.retireHistory(request); err != nil {
 		refuse(w, 409)
 		return
