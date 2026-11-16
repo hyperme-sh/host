@@ -38,7 +38,7 @@ func (a *Agent) handleHealthAuthorization(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	writeJSON(w, http.StatusOK, struct {
+	encodeJSON(w, http.StatusOK, struct {
 		Version      int       `json:"version"`
 		Policy       string    `json:"policy"`
 		DeviceID     string    `json:"device_id"`
