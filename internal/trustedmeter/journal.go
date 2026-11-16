@@ -55,6 +55,15 @@ func OpenJournal(path string, b Binding, key ed25519.PublicKey) (*Journal, error
 	if len(raw) > 8<<20 {
 		return nil, ErrInvalid
 	}
+	// Reject ambiguous JSON before decoding the larger journal structure.
+	check := json.NewDecoder(strings.NewReader(string(raw)))
+	check.UseNumber()
+	if _, err = parse(check, 0); err != nil {
+		return nil, err
+	}
+	if _, err = check.Token(); err != io.EOF {
+		return nil, ErrInvalid
+	}
 	// The journal is larger than a single wire record, so decode its structure
 	// separately, then verify every bounded signed record and all identities.
 	d := json.NewDecoder(strings.NewReader(string(raw)))
@@ -112,6 +121,9 @@ func (j *Journal) validate(e Entry) error {
 			return err
 		}
 		prior = c.Counters
+	}
+	if e.Phase == "starting" && (e.StartID != "" || len(e.Records) != 0) {
+		return ErrInvalid
 	}
 	if e.Phase == "terminal" && len(e.Records) == 0 {
 		return ErrInvalid

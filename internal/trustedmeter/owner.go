@@ -23,7 +23,7 @@ type Grant struct {
 	Deadline      int64  `json:"deadline"`
 	MaxBillable   int64  `json:"max_billable"`
 	MaxRecordOnly int64  `json:"max_record_only"`
-	Replayed      bool   `json:"replayed,omitempty"`
+	Replayed      bool   `json:"replayed"`
 	SHA256        string `json:"sha256,omitempty"`
 	Sequence      int    `json:"sequence,omitempty"`
 }
@@ -87,6 +87,13 @@ func VerifyGrant(s Signed, key ed25519.PublicKey, b Binding, operation string, r
 	}
 	if err = strict(raw, &g); err != nil {
 		return g, err
+	}
+	var fields map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &fields); err != nil {
+		return Grant{}, err
+	}
+	if operation == "start" && string(fields["replayed"]) != "false" {
+		return Grant{}, ErrDisputed
 	}
 	if (operation != "start" && operation != "renew") || !uuidPattern.MatchString(g.StartID) || g.MaxBillable != maxBillable || g.MaxRecordOnly != maxRecordOnly || maxBillable < 0 || maxRecordOnly < 0 || g.IssuedAt == nil {
 		return Grant{}, ErrInvalid

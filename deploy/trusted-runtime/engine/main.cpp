@@ -39,7 +39,7 @@ int main(int argc,char **argv) {
         std::vector<char> prompt(131072);
         int length=llama_chat_apply_template(tmpl.c_str(),messages.data(),messages.size(),true,prompt.data(),prompt.size());
         if(length<0||size_t(length)>prompt.size())return 2;
-        llama_backend_init();auto mp=llama_model_default_params();mp.n_gpu_layers=0;mp.use_mmap=false;
+        llama_backend_init();auto mp=llama_model_default_params();mp.n_gpu_layers=0;mp.load_mode=LLAMA_LOAD_MODE_NONE;
         auto *model=llama_model_load_from_file(argv[1],mp);if(!model)return 3;
         const auto *vocab=llama_model_get_vocab(model);
         std::vector<llama_token> tokens(2048);
@@ -72,6 +72,7 @@ int main(int argc,char **argv) {
             // terminal state unavailable, rather than guessing a partial decode.
             if(!permit("decode",0))return 4;
             if(llama_decode(ctx,llama_batch_get_one(&token,1))!=0)return 3;
+            std::cout<<json{{"event","decoded"}}.dump()<<std::endl;
         }
         std::cout<<json{{"event","completed"}}.dump()<<std::endl;
         llama_free(ctx);llama_model_free(model);llama_backend_free();return 0;
