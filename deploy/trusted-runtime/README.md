@@ -41,7 +41,9 @@ anchored to the protected clock sample before the initial send, subtracting one
 second for timestamp quantization and the qualified rate allowance. Replayed
 starts never authorize work; late renewals cannot resurrect an expired grant.
 
-The count-only journal uses atomic replacement, file and directory sync, strict
+The count-only journal is partitioned by runtime key and request, so completed
+requests do not exhaust a shared lifetime quota. Each bounded partition uses
+atomic replacement, file and directory sync, strict
 JSON parsing, signatures, hash continuity, and monotonically increasing counts.
 After reopening, it serves existing records read-only and never resumes work.
 A local terminal record still needs its matching Plane anchor for settlement.

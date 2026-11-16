@@ -29,7 +29,6 @@ type Server struct {
 	drift       int64
 	files       EngineFiles
 	stateDir    string
-	journal     *Journal
 	certificate tls.Certificate
 	quote       func(Attestation) ([]byte, error)
 	execution   sync.Mutex
@@ -74,15 +73,11 @@ func newGuestServer(b Binding, key ed25519.PrivateKey, owner ed25519.PublicKey, 
 	if err = os.MkdirAll(stateDir, 0700); err != nil {
 		return nil, err
 	}
-	journal, err := OpenJournal(filepath.Join(stateDir, hex.EncodeToString(key.Public().(ed25519.PublicKey))+".json"), b, key.Public().(ed25519.PublicKey))
-	if err != nil {
-		return nil, err
-	}
 	certificate, err := guestCertificate(key)
 	if err != nil {
 		return nil, err
 	}
-	server := &Server{channels: channels, binding: b, key: key, owner: owner, clock: clock, drift: drift, files: files, stateDir: stateDir, journal: journal, certificate: certificate, quote: quote}
+	server := &Server{channels: channels, binding: b, key: key, owner: owner, clock: clock, drift: drift, files: files, stateDir: stateDir, certificate: certificate, quote: quote}
 	server.http = &http.Server{Handler: server, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 4096, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate}, ClientAuth: tls.RequireAnyClientCert}}
 	failed = false
 	return server, nil
@@ -192,15 +187,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		key, _ := hex.DecodeString(request.RuntimeKey)
-		journal := s.journal
-		if !ed25519.PublicKey(key).Equal(s.key.Public()) {
-			// Historical public keys come from the authenticated Gateway. It still
-			// checks these records against Plane's original session and count anchor.
-			journal, err = OpenJournal(filepath.Join(s.stateDir, request.RuntimeKey+".json"), s.binding, key)
-			if err != nil {
-				refuse(w, 409)
-				return
-			}
+		// Each request has its own bounded file. Historical public keys still
+		// require verification against Plane's original session and count anchor.
+		journal, err := s.requestJournal(key, request.BatchID)
+		if err != nil {
+			refuse(w, 409)
+			return
 		}
 		entry, err := journal.Status(s.binding, request.BatchID)
 		if err != nil {
@@ -329,7 +321,12 @@ func (s *Server) execute(w http.ResponseWriter, r *http.Request, peer ed25519.Pu
 		return
 	}
 	defer relay.Close()
-	controller, err := NewController(s.binding, request.Epoch, request.BatchID, s.key, s.owner, startChannelOwner{relay, s.channels, peer, r.Header.Get("X-Hypermesh-Meter-Channel")}, s.clock, s.journal, s.drift, request.MaxBillable, request.MaxRecordOnly)
+	journal, err := s.requestJournal(s.key.Public().(ed25519.PublicKey), request.BatchID)
+	if err != nil {
+		refuse(w, 409)
+		return
+	}
+	controller, err := NewController(s.binding, request.Epoch, request.BatchID, s.key, s.owner, startChannelOwner{relay, s.channels, peer, r.Header.Get("X-Hypermesh-Meter-Channel")}, s.clock, journal, s.drift, request.MaxBillable, request.MaxRecordOnly)
 	if err != nil {
 		refuse(w, 409)
 		return
@@ -376,4 +373,13 @@ func (o startChannelOwner) Exchange(ctx context.Context, operation string, reque
 		}
 	}
 	return response, nil
+}
+
+// Partitioning bounds each request without imposing a lifetime request quota.
+// Reopening a partition is read-only, including a duplicate execution attempt.
+func (s *Server) requestJournal(key ed25519.PublicKey, batchID string) (*Journal, error) {
+	if len(key) != ed25519.PublicKeySize || !uuidPattern.MatchString(batchID) {
+		return nil, ErrInvalid
+	}
+	return OpenJournal(filepath.Join(s.stateDir, hex.EncodeToString(key)+"-"+batchID+".json"), s.binding, key)
 }

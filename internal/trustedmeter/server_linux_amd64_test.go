@@ -8,8 +8,8 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -21,7 +21,8 @@ func TestGuestStatusRequiresOwnerChannelAndReplaysOriginalFinal(t *testing.T) {
 	clock := &fakeClock{time.Second}
 	channels, _ := NewChannels(binding(), pub, owner, clock, 1000)
 	dir := t.TempDir()
-	journal, err := OpenJournal(filepath.Join(dir, hex.EncodeToString(pub)+".json"), binding(), pub)
+	server := &Server{channels: channels, binding: binding(), key: key, stateDir: dir}
+	journal, err := server.requestJournal(pub, batch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,6 @@ func TestGuestStatusRequiresOwnerChannelAndReplaysOriginalFinal(t *testing.T) {
 	if err = journal.Append(batch, final); err != nil {
 		t.Fatal(err)
 	}
-	server := &Server{channels: channels, binding: binding(), key: key, stateDir: dir, journal: journal}
 	call := func(path, token string, body any, tlsKey ed25519.PublicKey) *httptest.ResponseRecorder {
 		raw, _ := json.Marshal(body)
 		request := httptest.NewRequest("POST", path, bytes.NewReader(raw))
@@ -93,5 +93,46 @@ func TestExecutionPayloadRejectsDuplicatesAndPreservesUnicode(t *testing.T) {
 	raw, _ = json.Marshal(valid)
 	if _, err = decodeExecution(raw); err == nil {
 		t.Fatal("unbounded output")
+	}
+}
+
+func TestGuestHistoryPartitionsSurviveBeyondFormerLifetimeLimit(t *testing.T) {
+	pub, key, _ := ed25519.GenerateKey(rand.Reader)
+	server := &Server{binding: binding(), key: key, stateDir: t.TempDir()}
+	for n := 0; n < 140; n++ {
+		id := fmt.Sprintf("%08x-5555-5555-5555-555555555555", n)
+		journal, err := server.requestJournal(pub, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = journal.Begin(id, epoch); err != nil {
+			t.Fatal(n, err)
+		}
+		if err = journal.Started(id, start); err != nil {
+			t.Fatal(err)
+		}
+		record := checkpoint()
+		record.BatchID = id
+		final, err := Sign(record, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = journal.Append(id, final); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, n := range []int{0, 128, 139} {
+		id := fmt.Sprintf("%08x-5555-5555-5555-555555555555", n)
+		journal, err := server.requestJournal(pub, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := journal.Status(binding(), id)
+		if err != nil || status.Phase != "terminal" || len(status.Records) != 1 {
+			t.Fatal(status, err)
+		}
+		if journal.Begin(id, epoch) == nil {
+			t.Fatal("duplicate request resumed")
+		}
 	}
 }
