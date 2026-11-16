@@ -34,6 +34,9 @@ func TestSNPStopPreservesJournalAndRefusesUnsafeScope(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := os.WriteFile(filepath.Join(root, "journal", "count.json"), []byte("unit retained count"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	s := NewSNP("", state)
 	calls := 0
 	s.Run = func(_ context.Context, name string, args ...string) ([]byte, error) {
