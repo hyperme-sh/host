@@ -76,7 +76,7 @@ func (b *Bridge) machine(w http.ResponseWriter, r *http.Request) {
 		fail()
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 315*time.Second)
 	defer cancel()
 	if r.Method == "GET" {
 		fact, e := b.machineContext(ctx)
@@ -87,7 +87,7 @@ func (b *Bridge) machine(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(fact)
 		return
 	}
-	raw, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 96<<10))
+	raw, e := io.ReadAll(http.MaxBytesReader(w, r.Body, 512<<10))
 	if e != nil {
 		fail()
 		return
@@ -118,7 +118,7 @@ func (b *Bridge) machine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope, _ := json.Marshal(map[string]any{"credential": token, "submission_base64": base64.StdEncoding.EncodeToString(raw)})
-	result, e := b.command(ctx, "machine-prompt", envelope, 262144)
+	result, e := b.command(ctx, "machine-prompt", envelope, 524288)
 	if e != nil {
 		fail()
 		return

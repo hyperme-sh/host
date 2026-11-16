@@ -17,7 +17,7 @@ machine credential over stdin. Conductor verifies the owner task before AIuditor
 and provider dispatch. No owner token, machine credential or private key reaches
 the editor. Owner authorization cannot be replaced with machine context alone.
 
-Requests are bounded to thirty seconds. Disconnect cancels the child request;
+Conductor operations are bounded to five minutes; the bridge allows brief transport overhead. Disconnect cancels the child request;
 unknown outcomes are not retried. Local pause, current heartbeat, task cancellation
 and assignment revocation remain enforced by their owners. These endpoints use
 the existing private UID-checked socket and initially support the Linux host bridge.

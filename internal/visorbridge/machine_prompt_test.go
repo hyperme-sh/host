@@ -23,7 +23,7 @@ func TestMachinePromptKeepsOwnerBytesAndConfiguredRoute(t *testing.T) {
 	body["class"] = p.Class
 	body["destination"] = p.Destination
 	body["max_output_tokens"] = p.MaxOutput
-	body["prompt"] = "private <prompt>"
+	body["prompt"] = strings.Repeat("\n", 50000)
 	raw, _ := json.MarshalIndent(body, "", " ")
 	calls := 0
 	b.command = func(_ context.Context, action string, input []byte, limit int) ([]byte, error) {
