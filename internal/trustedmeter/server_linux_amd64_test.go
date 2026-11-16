@@ -69,6 +69,29 @@ func TestGuestStatusRequiresOwnerChannelAndReplaysOriginalFinal(t *testing.T) {
 	if response.Code != 200 {
 		t.Fatal(response.Body.String())
 	}
+	// A separately authorized new guest serves the original journal only.
+	server.channels, _ = NewChannels(binding(), newKey.Public().(ed25519.PublicKey), owner, clock, 1000)
+	response = call("/history/channels/challenge", "", HistoryScope{batch, hex.EncodeToString(pub)}, peer)
+	var historical HistoryChannelRequest
+	if json.Unmarshal(response.Body.Bytes(), &historical) != nil || response.Code != 200 {
+		t.Fatal(response.Body.String())
+	}
+	response = call("/history/channels/authorize", "", map[string]any{"nonce": historical.Nonce, "proof": historyProof(t, ownerKey, historical)}, peer)
+	if json.Unmarshal(response.Body.Bytes(), &authorization) != nil || response.Code != 200 {
+		t.Fatal(response.Body.String())
+	}
+	response = call("/status", authorization["channel"], body, peer)
+	if response.Code != 200 {
+		t.Fatal(response.Body.String())
+	}
+	for _, path := range []string{"/quote", "/execute"} {
+		if call(path, authorization["channel"], body, peer).Code != 403 {
+			t.Fatal("historical access to", path)
+		}
+	}
+	if call("/status", authorization["channel"], map[string]string{"batch_id": epoch, "runtime_key": hex.EncodeToString(pub)}, peer).Code != 403 {
+		t.Fatal("other batch access")
+	}
 	other, _, _ := ed25519.GenerateKey(rand.Reader)
 	if call("/status", authorization["channel"], body, other).Code != 403 {
 		t.Fatal("channel transferred")
