@@ -49,6 +49,7 @@ type Config struct {
 	Identity          string          `json:"identity"`
 	WireGuardKey      string          `json:"wireguard_key,omitempty"`
 	Enabled           []Binding       `json:"enabled"`
+	MachinePrompt     *PromptConfig   `json:"machine_prompt,omitempty"`
 	PermissionPreview *PreviewBinding `json:"permission_preview,omitempty"`
 }
 
@@ -103,6 +104,15 @@ func New(config Config) (*Bridge, error) {
 			return nil, refused
 		}
 		args := []string{action, "--config", config.DispatchConfig}
+		if action == "machine-context" {
+			args = []string{action, "--plane", config.Base}
+		}
+		if action == "machine-prompt" {
+			if config.MachinePrompt == nil || !config.MachinePrompt.valid() {
+				return nil, refused
+			}
+			args = []string{action, "--socket", config.MachinePrompt.Socket}
+		}
 		if action == "permission-preview" {
 			endpoint, _ := url.Parse(config.AuthorityURL)
 			endpoint.Path = "/api/v1/aiuditor/access/preview"
@@ -265,6 +275,10 @@ func (b *Bridge) Handler() http.Handler {
 				return
 			}
 			json.NewEncoder(w).Encode(map[string]any{"version": 1, "configured_only": true, "tenant_id": b.config.Tenant, "device_id": b.config.Device, "binding": b.config.PermissionPreview})
+			return
+		}
+		if (r.URL.Path == "/machine-context" && r.Method == "GET") || (r.URL.Path == "/machine-prompt" && r.Method == "POST") {
+			b.machine(w, r)
 			return
 		}
 		if r.URL.Path == "/permission-preview" && r.Method == "POST" {
