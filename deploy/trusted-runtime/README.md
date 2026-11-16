@@ -42,7 +42,12 @@ second for timestamp quantization and the qualified rate allowance. Replayed
 starts never authorize work; late renewals cannot resurrect an expired grant.
 
 The count-only journal is partitioned by runtime key and request, so completed
-requests do not exhaust a shared lifetime quota. Each bounded partition uses
+requests do not exhaust a shared lifetime quota when settled history is retired.
+The guest bounds retained history to 256 files and 64 MiB, reserving room for
+atomic replacement before each request. Host reserves that allowance within
+a global 2048-file/256-MiB history budget before launching a lease. Quota
+exhaustion refuses new work while keeping existing status readable. Each
+bounded partition uses
 atomic replacement, file and directory sync, strict
 JSON parsing, signatures, hash continuity, and monotonically increasing counts.
 After reopening, it serves existing records read-only and never resumes work.
@@ -75,6 +80,15 @@ limits, buffers output transiently, and returns it only after the terminal
 count is anchored. The journal never resumes a reopened request. A new guest
 can serve an earlier public key's signed records, but cannot renew that session.
 
+Authenticated `POST /retire` accepts `batch_id`, `runtime_key`, `operation`
+(`recover` or `cancel`) and the signed Plane owner `proof`. Retirement requires
+a matching recovered terminal hash/counters, or a matching owner no-start
+cancellation for an entry that never started. It never removes ambiguous or
+unsettled work. Gateway must commit its recovery first, then retire local copies;
+Plane remains the durable archive for immutable terminal replay. Host status
+can report missing after explicit retirement, so recovery must use owner history.
+Duplicate retirement is harmless. Missing proofs cannot bypass storage quotas.
+
 Host dispatch requires `runtime` and `backend` equal to `sev-snp-cpu`, the full
 `trusted_meter` binding, and `HYPERMESH_TRUSTED_METER_BUNDLE` pointing to a
 configured bundle directory. Missing configuration, changed scope, private
@@ -82,7 +96,7 @@ model sources, unsupported platforms or failed launch refuse the job. There
 is no ordinary runtime fallback. Host forwards opaque TCP through the existing
 tunnel; a listening socket is not attestation. Gateway must verify the quote
 and owner authority before sending inference. Shutdown stops the dedicated
-systemd unit and removes staged boot/input files while retaining count history.
+systemd unit (or confirms an already-collected unit is inactive with no PIDs) and removes staged boot/input files while retaining count history.
 
 ## Preparing a profile
 

@@ -3,9 +3,11 @@ package trustedmeter
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 func copyVerified(source, destination, digest string, limit int64) error {
@@ -50,6 +52,9 @@ func LeaseDirectory(stateDir, lease string) (string, error) {
 // PrepareLaunch stages exact downloaded boot artifacts and one model file.
 // Only the count journal is retained when the workload stops.
 func PrepareLaunch(bundleDir, stateDir string, b Binding, modelPath string, port int) (Bundle, []string, error) {
+	if err := ReserveHostJournal(stateDir, b.LeaseID); err != nil {
+		return Bundle{}, nil, err
+	}
 	bundle, err := LoadBundle(bundleDir, b)
 	if err != nil {
 		return bundle, nil, err
@@ -130,6 +135,16 @@ func CleanStoppedLaunch(stateDir, lease string) error {
 	}
 	for _, name := range []string{"boot", "input"} {
 		if err = os.RemoveAll(filepath.Join(root, name)); err != nil {
+			return err
+		}
+	}
+	// Empty retired histories need not accumulate per-lease directories.
+	journal := filepath.Join(root, "journal")
+	if err = os.Remove(journal); err != nil && !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTEMPTY) {
+		return err
+	}
+	if err == nil || os.IsNotExist(err) {
+		if err = os.Remove(root); err != nil && !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTEMPTY) {
 			return err
 		}
 	}

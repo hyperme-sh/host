@@ -126,3 +126,47 @@ func TestSNPStartUsesOnlyFixedConfidentialLaunch(t *testing.T) {
 		t.Fatal("duplicate active unit accepted")
 	}
 }
+
+func TestSNPCollectedUnitCleanupRequiresConfirmedStoppedState(t *testing.T) {
+	for _, tc := range []struct {
+		name, status string
+		allowed      bool
+	}{
+		{"collected", "LoadState=not-found\nActiveState=inactive\nMainPID=0\nControlPID=0\n", true},
+		{"exited", "LoadState=loaded\nActiveState=failed\nMainPID=0\nControlPID=0\n", true},
+		{"active", "LoadState=loaded\nActiveState=active\nMainPID=321\nControlPID=0\n", false},
+		{"shutdown", "LoadState=loaded\nActiveState=inactive\nMainPID=0\nControlPID=321\n", false},
+		{"unavailable", "", false},
+		{"ambiguous", "LoadState=not-found\nActiveState=inactive\nMainPID=0\nControlPID=0\nMainPID=12", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := t.TempDir()
+			lease := "22222222-2222-2222-2222-222222222222"
+			boot := filepath.Join(state, "trusted-meter", lease, "boot")
+			if err := os.MkdirAll(boot, 0700); err != nil {
+				t.Fatal(err)
+			}
+			s := NewSNP("", state)
+			s.Run = func(_ context.Context, name string, args ...string) ([]byte, error) {
+				if name != "/usr/bin/systemctl" {
+					t.Fatal(name)
+				}
+				if args[0] == "stop" {
+					return nil, errors.New("unit stop failed")
+				}
+				if args[0] != "show" {
+					t.Fatal(args)
+				}
+				return []byte(tc.status), errors.New("exit status")
+			}
+			err := s.Stop(context.Background(), &Handle{Backend: BackendSNP, LeaseID: lease})
+			if (err == nil) != tc.allowed {
+				t.Fatal(err)
+			}
+			_, err = os.Stat(boot)
+			if os.IsNotExist(err) != tc.allowed {
+				t.Fatal("unsafe cleanup", err)
+			}
+		})
+	}
+}

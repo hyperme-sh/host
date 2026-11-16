@@ -204,6 +204,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reply(w, entry)
+	case "/retire":
+		s.retire(w, r)
 	case "/execute":
 		s.execute(w, r, peer)
 	default:
@@ -381,5 +383,13 @@ func (s *Server) requestJournal(key ed25519.PublicKey, batchID string) (*Journal
 	if len(key) != ed25519.PublicKeySize || !uuidPattern.MatchString(batchID) {
 		return nil, ErrInvalid
 	}
-	return OpenJournal(filepath.Join(s.stateDir, hex.EncodeToString(key)+"-"+batchID+".json"), s.binding, key)
+	path := filepath.Join(s.stateDir, hex.EncodeToString(key)+"-"+batchID+".json")
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		if err = reserveRequestJournal(s.stateDir); err != nil {
+			return nil, err
+		}
+	} else if err != nil {
+		return nil, err
+	}
+	return OpenJournal(path, s.binding, key)
 }

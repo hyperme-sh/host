@@ -71,7 +71,10 @@ func (s *SNP) Stop(ctx context.Context, h *Handle) error {
 		return ErrTrustedRuntime
 	}
 	if _, err := s.run(ctx, "/usr/bin/systemctl", "stop", "hypermesh-meter-"+h.LeaseID); err != nil {
-		return ErrTrustedRuntime
+		status, _ := s.run(ctx, "/usr/bin/systemctl", "show", "--property=LoadState,ActiveState,MainPID,ControlPID", "hypermesh-meter-"+h.LeaseID)
+		if !confirmedStoppedUnit(string(status)) {
+			return ErrTrustedRuntime
+		}
 	}
 	return trustedmeter.CleanStoppedLaunch(s.StateDir, h.LeaseID)
 }
@@ -82,4 +85,22 @@ func ValidTrustedDial(address string) bool {
 	}
 	number, err := strconv.Atoi(port)
 	return err == nil && number >= 1024 && number <= 65535 && !strings.ContainsAny(address, "\r\n")
+}
+
+func confirmedStoppedUnit(raw string) bool {
+	fields := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		pair := strings.SplitN(line, "=", 2)
+		if len(pair) != 2 {
+			return false
+		}
+		if _, duplicate := fields[pair[0]]; duplicate {
+			return false
+		}
+		fields[pair[0]] = pair[1]
+	}
+	if len(fields) != 4 || fields["MainPID"] != "0" || fields["ControlPID"] != "0" {
+		return false
+	}
+	return fields["LoadState"] == "not-found" && fields["ActiveState"] == "inactive" || fields["LoadState"] == "loaded" && (fields["ActiveState"] == "inactive" || fields["ActiveState"] == "failed")
 }
