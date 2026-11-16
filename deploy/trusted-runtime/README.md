@@ -52,11 +52,15 @@ token ID, or prompt hash is stored in the journal.
   on an ordinary host does not establish the required boundary. The supervisor,
   kernel, libraries, template policy, and model loading path must be covered by
   the approved profile. Provider-writable model files are not acceptable.
-- Real protected-time adapter and qualification of pause, drift, and rollback
-  behavior. The `ProtectedClock` interface is not a hardware implementation.
-- Guest-only ephemeral key generation and SNP quote collection, bound to the
-  independent verifier's fresh challenge and exact workload profile. An ordinary
-  host key or local capability report cannot replace independent verification.
+- Qualification of the Linux Secure TSC adapter against the measured kernel,
+  including pause, drift, and rollback behavior. It rejects SNP without Secure
+  TSC and non-TSC clock sources, and has no wall-time fallback. These local
+  checks are not independent platform verification.
+- Wire the guest key/quote implementation into the measured boot path and
+  independent verifier challenge exchange. The code generates an ephemeral
+  Ed25519 key in memory and uses the real SNP device at VMPL 0. It binds the
+  quote to the key, full statement, nonce and workload. Only the independent
+  verifier can validate vendor trust, current policy and approved measurement.
 - Authenticated Gateway TLS terminating inside the guest, binding the complete
   inference body and limits to the admitted request; scoped status/final APIs.
 - Host launch and shutdown wiring with no ordinary CPU fallback, plus unit and
@@ -80,3 +84,15 @@ Plane's Python signer, owner grants, replay/expiry/rollback handling, budgets,
 journal restart, and file digests. `counter-contract` checks the isolated C++
 count hook and failed decode behavior. The CI engine job builds the pinned CPU
 source without downloading a model or running inference.
+
+## Platform references
+
+The clock checks use Linux's [SNP Secure TSC status bit](https://github.com/torvalds/linux/blob/master/arch/x86/include/asm/msr-index.h)
+and the measured kernel's `CLOCK_MONOTONIC_RAW` TSC source. The initial profile
+must disable suspend, clock replacement, migration, debug access and swap.
+The issuer must qualify its rate bound; the constructor does not infer it.
+
+Quote collection uses [go-sev-guest v0.15.0](https://github.com/google/go-sev-guest/tree/v0.15.0).
+Its [key derivation limitations](https://github.com/google/go-sev-guest/blob/v0.15.0/LIMITATIONS.md)
+explain why a generic firmware measurement does not identify a workload. This
+implementation does not derive or seal a key under a generic VM measurement.

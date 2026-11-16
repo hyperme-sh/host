@@ -142,6 +142,7 @@ func (j *Journal) save() error {
 		return err
 	}
 	if len(raw) > 8<<20 {
+		j.failed = true
 		return ErrInvalid
 	}
 	dir := filepath.Dir(j.path)

@@ -21,3 +21,6 @@ add_executable(hypermesh-counted-cpu main.cpp)
 target_include_directories(hypermesh-counted-cpu PRIVATE ${LLAMA_SOURCE}/vendor)
 target_link_libraries(hypermesh-counted-cpu PRIVATE llama)
 add_executable(counter-contract counter_test.cpp)
+
+# Keep contract assertions active in Release builds.
+target_compile_options(counter-contract PRIVATE -UNDEBUG)

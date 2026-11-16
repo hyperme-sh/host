@@ -25,7 +25,8 @@ int main(int argc,char **argv) {
         std::string line;if(!std::getline(std::cin,line)||line.size()>65536)return 2;
         auto body=json::parse(line);
         if(!body.is_object()||body.size()!=2||!body.contains("messages")||!body.contains("max_tokens")||!body["max_tokens"].is_number_integer())return 2;
-        int limit=body["max_tokens"].get<int>();if(limit<1||limit>128||!body["messages"].is_array()||body["messages"].empty()||body["messages"].size()>64)return 2;
+        if(body["max_tokens"]<1||body["max_tokens"]>128)return 2;
+        int limit=body["max_tokens"].get<int>();if(!body["messages"].is_array()||body["messages"].empty()||body["messages"].size()>64)return 2;
         std::vector<std::string> roles,texts;std::vector<llama_chat_message> messages;
         for(const auto &m:body["messages"]) {
             if(!m.is_object()||m.size()!=2||!m.contains("role")||!m.contains("content")||!m["role"].is_string()||!m["content"].is_string())return 2;
