@@ -18,14 +18,15 @@ type fakeClock struct{ now time.Duration }
 func (f *fakeClock) Sample() (time.Duration, error) { return f.now, nil }
 
 type fakeOwner struct {
-	key     ed25519.PrivateKey
-	clock   *fakeClock
-	calls   []string
-	replay  bool
-	delay   time.Duration
-	fail    string
-	journal *Journal
-	t       *testing.T
+	advanceCheckpoint time.Duration
+	key               ed25519.PrivateKey
+	clock             *fakeClock
+	calls             []string
+	replay            bool
+	delay             time.Duration
+	fail              string
+	journal           *Journal
+	t                 *testing.T
 }
 
 func (f *fakeOwner) Exchange(ctx context.Context, operation string, request Signed) (Signed, error) {
@@ -37,11 +38,13 @@ func (f *fakeOwner) Exchange(ctx context.Context, operation string, request Sign
 	issued := int64(1000)
 	var result any = Grant{StartID: start, IssuedAt: &issued, Deadline: 1030, MaxBillable: 100, MaxRecordOnly: 200, Replayed: f.replay}
 	if operation == "checkpoint" {
+		f.clock.now += f.advanceCheckpoint
+		f.advanceCheckpoint = 0
 		var record Checkpoint
 		if err := strict(request.Record, &record); err != nil {
 			f.t.Fatal(err)
 		}
-		status, err := f.journal.Status(binding(), batch)
+		status, err := f.journal.Status(f.journal.data.Binding, batch)
 		if err != nil || len(status.Records) != record.Sequence {
 			f.t.Fatal("not durable before anchor", err)
 		}

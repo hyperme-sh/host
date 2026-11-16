@@ -87,11 +87,6 @@ func RunCPU(ctx context.Context, c *Controller, files EngineFiles, request []byt
 		input.Close()
 		return err
 	}
-	if err = c.Start(ctx); err != nil {
-		input.Close()
-		stdout.Close()
-		return err
-	}
 	if err = cmd.Start(); err != nil {
 		input.Close()
 		stdout.Close()
@@ -111,6 +106,7 @@ func RunCPU(ctx context.Context, c *Controller, files EngineFiles, request []byt
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 4096), 40000)
 	completed := false
+	started := false
 	outputReady := false
 	for scanner.Scan() {
 		var fields map[string]json.RawMessage
@@ -132,6 +128,16 @@ func RunCPU(ctx context.Context, c *Controller, files EngineFiles, request []byt
 				return ErrInvalid
 			}
 			outputReady = false
+			if !started {
+				// Loading and tokenization precede the grant; no decode can run
+				// until its first permit has an owner-authorized start.
+				if err = c.Start(ctx); err != nil {
+					return err
+				}
+				started = true
+			} else if err = c.EnsureGrant(ctx); err != nil {
+				return err
+			}
 			if err = c.Permit(kind, count); err != nil {
 				return err
 			}
@@ -208,6 +214,9 @@ func RunCPU(ctx context.Context, c *Controller, files EngineFiles, request []byt
 	waited = true
 	if err != nil {
 		return fmt.Errorf("%w: engine exit", ErrDisputed)
+	}
+	if err = c.EnsureGrant(ctx); err != nil {
+		return err
 	}
 	return c.Finish(ctx, "completed")
 }

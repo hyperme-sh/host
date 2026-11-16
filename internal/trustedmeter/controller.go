@@ -355,3 +355,23 @@ func (c *Controller) Dispute() { c.mu.Lock(); defer c.mu.Unlock(); c.failed = tr
 
 // DecodeSigned is the bounded strict parser for owner HTTP responses.
 func DecodeSigned(raw []byte) (Signed, error) { var s Signed; err := strict(raw, &s); return s, err }
+
+// EnsureGrant renews at an engine boundary, never while a step is pending.
+// Slow steps that exceed their current grant remain disputed.
+func (c *Controller) EnsureGrant(ctx context.Context) error {
+	c.mu.Lock()
+	err := c.live()
+	if err == nil && c.pendingKind != "" {
+		c.failed = true
+		err = ErrDisputed
+	}
+	renew := err == nil && c.deadline-c.lastSample <= 10*time.Second
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if renew {
+		return c.Renew(ctx)
+	}
+	return nil
+}
