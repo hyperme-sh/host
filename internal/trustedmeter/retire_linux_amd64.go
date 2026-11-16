@@ -15,8 +15,8 @@ type retirement struct {
 	Proof      Signed `json:"proof"`
 }
 
-// Only signed owner recovery or no-start cancellation allows local history
-// deletion. Plane retains the immutable terminal record and replay authority.
+// Signed owner recovery, cancellation or durable dispute archival permits
+// local deletion. Plane retains history and permanent replay authority.
 func (s *Server) retire(w http.ResponseWriter, r *http.Request) {
 	if !s.execution.TryLock() {
 		refuse(w, 409)
@@ -36,10 +36,17 @@ func (s *Server) retire(w http.ResponseWriter, r *http.Request) {
 	reply(w, map[string]bool{"retired": true})
 }
 func (s *Server) retireHistory(request retirement) error {
-	if !uuidPattern.MatchString(request.BatchID) || !digestPattern.MatchString(request.RuntimeKey) || (request.Operation != "recover" && request.Operation != "cancel") {
+	if !uuidPattern.MatchString(request.BatchID) || !digestPattern.MatchString(request.RuntimeKey) || (request.Operation != "recover" && request.Operation != "cancel" && request.Operation != "archive-dispute") {
 		return ErrInvalid
 	}
-	raw, err := VerifyOwner(request.Proof, s.owner, s.binding, request.Operation, map[string]string{"batch_id": request.BatchID})
+	var archive disputeArchiveResult
+	var raw []byte
+	var err error
+	if request.Operation == "archive-dispute" {
+		archive, err = s.verifyDisputeArchive(request)
+	} else {
+		raw, err = VerifyOwner(request.Proof, s.owner, s.binding, request.Operation, map[string]string{"batch_id": request.BatchID})
+	}
 	if err != nil {
 		return err
 	}
@@ -62,7 +69,7 @@ func (s *Server) retireHistory(request retirement) error {
 		}
 		terminal = result.TerminalSHA256
 		recovered = result.Counters
-	} else {
+	} else if request.Operation == "cancel" {
 		var result struct {
 			BatchID        string `json:"batch_id"`
 			TerminalSHA256 string `json:"terminal_sha256"`
@@ -72,7 +79,7 @@ func (s *Server) retireHistory(request retirement) error {
 		}
 		terminal = result.TerminalSHA256
 	}
-	if !digestPattern.MatchString(terminal) {
+	if request.Operation != "archive-dispute" && !digestPattern.MatchString(terminal) {
 		return ErrInvalid
 	}
 	path := filepath.Join(s.stateDir, request.RuntimeKey+"-"+request.BatchID+".json")
@@ -88,7 +95,11 @@ func (s *Server) retireHistory(request retirement) error {
 		if err != nil {
 			return err
 		}
-		if request.Operation == "recover" {
+		if request.Operation == "archive-dispute" {
+			if err = s.matchDisputeArchive(request, entry, archive); err != nil {
+				return err
+			}
+		} else if request.Operation == "recover" {
 			if entry.Phase != "terminal" || len(entry.Records) == 0 {
 				return ErrDisputed
 			}

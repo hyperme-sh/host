@@ -81,13 +81,34 @@ count is anchored. The journal never resumes a reopened request. A new guest
 can serve an earlier public key's signed records, but cannot renew that session.
 
 Authenticated `POST /retire` accepts `batch_id`, `runtime_key`, `operation`
-(`recover` or `cancel`) and the signed Plane owner `proof`. Retirement requires
-a matching recovered terminal hash/counters, or a matching owner no-start
-cancellation for an entry that never started. It never removes ambiguous or
-unsettled work. Gateway must commit its recovery first, then retire local copies;
-Plane remains the durable archive for immutable terminal replay. Host status
-can report missing after explicit retirement, so recovery must use owner history.
+(`recover`, `cancel`, or `archive-dispute`) and the signed Plane owner `proof`.
+Recovery requires matching terminal hash/counters; cancellation requires an
+entry that never started. For interrupted nonterminal work, only a durable
+owner archive permits deletion. It remains disputed, without inferred zero,
+partial settlement, or execution replay. Gateway commits recovery or archival
+first, then retires the local copy. Plane retains history for later retrieval.
 Duplicate retirement is harmless. Missing proofs cannot bypass storage quotas.
+
+The additive `archive-dispute` owner operation hashes the request
+`{"batch_id": <UUID>, "runtime_key": <hex public key>}`. Its strict result has
+`batch_id`, `runtime_key`, `archive_sha256`, `last_anchor_sequence`,
+`last_anchor_sha256`, and `status` equal to `disputed`. The archive hash is the
+canonical SHA-256 of the `DisputeArchive` manifest: kind `archived-dispute-v1`,
+full binding, runtime key, batch ID, epoch, start ID, phase, local record count
+(`sequence`), and `last_record_sha256`. A zero-record history uses 64 zeroes.
+The final record hash commits the verified signed chain, including an unaccepted
+local tail. The owner anchor must match a prefix of that history (sequence zero
+uses 64 zeroes). The manifest covers both an interrupted start response and an
+interrupted running request. A local terminal tail lost before owner acceptance
+can also be archived; an owner-anchored terminal must use ordinary recovery.
+
+Plane #161 must implement durable storage of the complete original `Entry` and
+its owner authority state before issuing this proof, with a permanent fence
+against further start/renew/checkpoint or settlement of the disputed batch.
+Archive replay must survive restart and revocation. Host implements only this
+proof consumer; its unit signer substitutes for that pending owner API.
+Gateway #70/#69 must retrieve and commit the archive before requesting retirement.
+The profile and digest billing stay disabled until those dependencies are ready.
 
 Host dispatch requires `runtime` and `backend` equal to `sev-snp-cpu`, the full
 `trusted_meter` binding, and `HYPERMESH_TRUSTED_METER_BUNDLE` pointing to a
