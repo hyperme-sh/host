@@ -1,6 +1,9 @@
 package api
 
-import "time"
+import (
+	"github.com/FyberLabs/hypermesh-host/internal/trustedmeter"
+	"time"
+)
 
 // Paths under the Hypermesh control-plane prefix.
 const (
@@ -141,9 +144,9 @@ type HostHealth struct {
 type PathBState string
 
 const (
-	PathBUncertified  PathBState = "uncertified"
-	PathBGreen     PathBState = "green"
-	PathBSuspended PathBState = "suspended"
+	PathBUncertified PathBState = "uncertified"
+	PathBGreen       PathBState = "green"
+	PathBSuspended   PathBState = "suspended"
 )
 
 // SellState is host-reported sell posture. It is separate from
@@ -196,16 +199,17 @@ type ModelConfiguration struct {
 }
 
 type Job struct {
-	CertificationContextTokens int `json:"certification_context_tokens,omitempty"`
-	EnvironmentHash          string              `json:"environment_hash,omitempty"`
-	ModelConfiguration       *ModelConfiguration `json:"model_configuration,omitempty"`
-	ModelConfigurationSHA256 string              `json:"model_configuration_sha256,omitempty"`
-	JobID                    string              `json:"job_id"`
-	Kind                     JobKind             `json:"kind"`
-	DeviceID                 string              `json:"device_id"`
-	LeaseID                  string              `json:"lease_id,omitempty"`
-	CatalogID                string              `json:"catalog_id,omitempty"`
-	ImageDigest              string              `json:"image_digest,omitempty"`
+	TrustedMeter               *trustedmeter.Binding `json:"trusted_meter,omitempty"`
+	CertificationContextTokens int                   `json:"certification_context_tokens,omitempty"`
+	EnvironmentHash            string                `json:"environment_hash,omitempty"`
+	ModelConfiguration         *ModelConfiguration   `json:"model_configuration,omitempty"`
+	ModelConfigurationSHA256   string                `json:"model_configuration_sha256,omitempty"`
+	JobID                      string                `json:"job_id"`
+	Kind                       JobKind               `json:"kind"`
+	DeviceID                   string                `json:"device_id"`
+	LeaseID                    string                `json:"lease_id,omitempty"`
+	CatalogID                  string                `json:"catalog_id,omitempty"`
+	ImageDigest                string                `json:"image_digest,omitempty"`
 	// SourceRef is the trusted fetch pin for lab_pull (repo@rev/file or
 	// allowlisted HTTPS URL). Distinct from ImageDigest (content sha256).
 	SourceRef string `json:"source_ref,omitempty"`

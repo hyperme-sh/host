@@ -40,6 +40,7 @@ var uuidRE = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 
 // Config is env/flag configuration for the host agent.
 type Config struct {
+	TrustedMeterBundle string
 	PrivateBlobAccount string // Exact Azure account; empty disables private model delivery.
 	HostName           string
 	Reenroll           bool
@@ -161,6 +162,7 @@ func FromEnv() Config {
 	return Config{
 		ControlPlaneURL:           envOr("HYPERMESH_CONTROL_PLANE_URL", defaultControlPlane),
 		TenantID:                  os.Getenv("HYPERMESH_TENANT_ID"),
+		TrustedMeterBundle:        os.Getenv("HYPERMESH_TRUSTED_METER_BUNDLE"),
 		EnrollToken:               os.Getenv("HYPERMESH_ENROLL_TOKEN"),
 		HostName:                  strings.TrimSpace(os.Getenv("HYPERMESH_HOST_NAME")),
 		Reenroll:                  os.Getenv("HYPERMESH_REENROLL") == "1",

@@ -1,0 +1,37 @@
+{
+  "producer": "hypermesh-plane 71b5d826ba5b2115b059248e0ea6f03718396e7e",
+  "public_key": "0d13ee4008f01ec203df4972e8e95b353d789a79cadb3ccbcf5bcb923e4ed0b5",
+  "signed": {
+    "record": {
+      "kind": "checkpoint-v1",
+      "binding": {
+        "tenant_id": "11111111-1111-1111-1111-111111111111",
+        "lease_id": "22222222-2222-2222-2222-222222222222",
+        "device_id": "33333333-3333-3333-3333-333333333333",
+        "gateway_id": "44444444-4444-4444-4444-444444444444",
+        "model_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "tokenizer_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "template_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "runtime_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "measurement": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "policy_sha256": "b4a700e6fb878eabd232407969710d4f83e1a791b916c4bd52036f6e53de4e26"
+      },
+      "epoch": "66666666-6666-6666-6666-666666666666",
+      "batch_id": "55555555-5555-5555-5555-555555555555",
+      "start_id": "77777777-7777-7777-7777-777777777777",
+      "sequence": 1,
+      "previous_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "counters": {
+        "processed_input": 5,
+        "accepted_output": 9,
+        "hidden_output": 7,
+        "cache_hits": 20,
+        "rejected_speculative": 30
+      },
+      "outcome": "completed"
+    },
+    "signature": "ebe5890123a17187385bc5f07e1d7c2d001995a61765150e71263246cd819b0f978560f484f7064c035755d27e0518fba3a154f7d0bc36bd5eb0fb81d420af00"
+  },
+  "record_sha256": "bea4362e9e9fd2b2cc61414aaec41e237f7288223eac68964f9f6ee738e5145b",
+  "canonical": "{\"batch_id\":\"55555555-5555-5555-5555-555555555555\",\"binding\":{\"device_id\":\"33333333-3333-3333-3333-333333333333\",\"gateway_id\":\"44444444-4444-4444-4444-444444444444\",\"lease_id\":\"22222222-2222-2222-2222-222222222222\",\"measurement\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"model_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"policy_sha256\":\"b4a700e6fb878eabd232407969710d4f83e1a791b916c4bd52036f6e53de4e26\",\"runtime_sha256\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"template_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"tenant_id\":\"11111111-1111-1111-1111-111111111111\",\"tokenizer_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"counters\":{\"accepted_output\":9,\"cache_hits\":20,\"hidden_output\":7,\"processed_input\":5,\"rejected_speculative\":30},\"epoch\":\"66666666-6666-6666-6666-666666666666\",\"kind\":\"checkpoint-v1\",\"outcome\":\"completed\",\"previous_sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"sequence\":1,\"start_id\":\"77777777-7777-7777-7777-777777777777\"}"
+}

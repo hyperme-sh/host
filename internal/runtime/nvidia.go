@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/FyberLabs/hypermesh-host/internal/trustedmeter"
 	"os/exec"
 	"strings"
 	"time"
@@ -46,6 +47,7 @@ const ContainerGGUFPath = "/models/model.gguf"
 // Spec is a leased workload from a lease_start job.
 // ImageDigest must be repo@digest (the fixed job field). No extra CP fields.
 type Spec struct {
+	TrustedMeter *trustedmeter.Binding
 	// SingleSlot reserves the approved context for one preflight sequence.
 	SingleSlot  bool
 	LeaseID     string
@@ -73,11 +75,14 @@ type Spec struct {
 
 // Handle is a started container or host process.
 type Handle struct {
-	Name        string
-	LeaseID     string
-	CatalogID   string
-	ImageDigest string
-	ContainerID string
+	TrustedMeterBindingSHA256 string `json:"trusted_meter_binding_sha256,omitempty"`
+	TrustedMeterBundleSHA256  string `json:"trusted_meter_bundle_sha256,omitempty"`
+	TrustedMeterDial          string `json:"trusted_meter_dial,omitempty"`
+	Name                      string
+	LeaseID                   string
+	CatalogID                 string
+	ImageDigest               string
+	ContainerID               string
 	// FileHash is sha256 of the mounted GGUF. lease_start POSTs this as
 	// image_hash. Distinct from ImageDigest (OCI repo@digest).
 	FileHash string `json:"file_hash,omitempty"`
@@ -114,7 +119,7 @@ func (h *Handle) Serving() bool {
 
 // NVIDIA talks to docker with --runtime=nvidia.
 type NVIDIA struct {
- cpu bool
+	cpu    bool
 	Docker string
 	Run    func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
@@ -135,7 +140,9 @@ func ImageRef(imageDigest string) (string, error) {
 		return "", ErrBareDigest
 	}
 	if !strings.Contains(s, "@") {
-		if ref, err := ChannelRef(imageDigest); err == nil { return ref, nil }
+		if ref, err := ChannelRef(imageDigest); err == nil {
+			return ref, nil
+		}
 		return "", ErrBareDigest
 	}
 	repo, dig, ok := strings.Cut(s, "@")
@@ -237,7 +244,9 @@ func (n *NVIDIA) Start(ctx context.Context, spec Spec) (*Handle, error) {
 	if _, err := requireServeAlias(spec.CatalogID); err != nil {
 		return nil, err
 	}
-	if n.cpu {spec.Backend=BackendLlamaCppCPU}
+	if n.cpu {
+		spec.Backend = BackendLlamaCppCPU
+	}
 	name := ContainerName(spec.LeaseID)
 	if out, err := n.run(ctx, PullArgs(ref)...); err != nil {
 		if !strings.Contains(ref, "@") || !n.imagePresent(ctx, ref) {
@@ -245,7 +254,9 @@ func (n *NVIDIA) Start(ctx context.Context, spec Spec) (*Handle, error) {
 		}
 	}
 	args := StartArgs(spec, ref)
- if n.cpu {args = CPUStartArgs(spec,ref)}
+	if n.cpu {
+		args = CPUStartArgs(spec, ref)
+	}
 	for _, a := range args {
 		if a == "--gpus" || strings.HasPrefix(a, "--gpus=") {
 			return nil, ErrUsesGPUsFlag

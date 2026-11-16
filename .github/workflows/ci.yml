@@ -161,3 +161,53 @@ jobs:
           go test -race ./internal/hardware ./internal/runtime
           go test -race ./internal/installer -run '^Test(Mac|Native)'
           go test -race ./internal/machineidentity ./internal/hostregistration
+
+  trusted-meter-engine:
+    name: trusted meter CPU build and counter contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Compile measured guest init and check archive builder
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$RUNNER_TEMP/meter-init" ./cmd/hypermesh-meter-guest
+          python3 deploy/trusted-runtime/test-build-initrd.py
+      - name: Fetch pinned CPU source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="$RUNNER_TEMP/meter-llama"
+          revision=$(python3 -c 'import json; print(json.load(open("deploy/trusted-runtime/engine/source.json"))["revision"])')
+          git init "$source_dir"
+          git -C "$source_dir" remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C "$source_dir" fetch --depth=1 origin "$revision"
+          git -C "$source_dir" checkout --detach FETCH_HEAD
+          test "$(git -C "$source_dir" rev-parse HEAD)" = "$revision"
+      - name: Compile CPU engine and run counter contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S deploy/trusted-runtime/engine -B "$RUNNER_TEMP/meter-build" \
+            -DLLAMA_SOURCE="$RUNNER_TEMP/meter-llama" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/meter-build" --target hypermesh-counted-cpu counter-contract -j2
+          "$RUNNER_TEMP/meter-build/counter-contract"
+      - name: Validate static guest archive with fixture profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' '{{ messages }}' > "$RUNNER_TEMP/meter-template.txt"
+          python3 deploy/trusted-runtime/build-initrd.py \
+            --guest "$RUNNER_TEMP/meter-init" \
+            --engine "$RUNNER_TEMP/meter-build/hypermesh-counted-cpu" \
+            --template "$RUNNER_TEMP/meter-template.txt" \
+            --owner-key 1111111111111111111111111111111111111111111111111111111111111111 \
+            --model-sha256 2222222222222222222222222222222222222222222222222222222222222222 \
+            --drift-ppm 100 --output "$RUNNER_TEMP/meter-archive-unit"

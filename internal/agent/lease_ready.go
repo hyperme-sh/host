@@ -155,6 +155,10 @@ func (a *Agent) ensureLeaseForwarder(ctx context.Context) {
 		return
 	}
 	h := a.currentLease()
+	if h != nil && h.Backend == runtime.BackendSNP {
+		_ = a.ensureTrustedForwarder(h)
+		return
+	}
 	if h == nil || !h.Serving() || (runtime.MetalImageEnabled() && h.Backend == runtime.BackendLlamaCppCPU) {
 		return
 	}

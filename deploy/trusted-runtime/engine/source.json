@@ -1,0 +1,1 @@
+{"repository":"https://github.com/ggml-org/llama.cpp.git","revision":"7fe450e19305b828c199d602c23a8337aaa1f03b","license":"MIT","profile":"cpu-greedy-fresh-context-v1","max_input_tokens":2048,"max_output_tokens":128,"cache":false,"speculation":false}
