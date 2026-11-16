@@ -18,17 +18,22 @@ type retirement struct {
 // Signed owner recovery, cancellation or durable dispute archival permits
 // local deletion. Plane retains history and permanent replay authority.
 func (s *Server) retire(w http.ResponseWriter, r *http.Request) {
-	if !s.execution.TryLock() {
-		refuse(w, 409)
-		return
-	}
-	defer s.execution.Unlock()
 	raw, err := readBody(r, 16384)
 	var request retirement
 	if err != nil || strict(raw, &request) != nil {
 		refuse(w, 400)
 		return
 	}
+	peer, err := tlsPeerKey(*r.TLS)
+	if err != nil || s.checkHistoryAccess(r, peer, "retire", request.BatchID, request.RuntimeKey) != nil {
+		refuse(w, 403)
+		return
+	}
+	if !s.execution.TryLock() {
+		refuse(w, 409)
+		return
+	}
+	defer s.execution.Unlock()
 	if err = s.retireHistory(request); err != nil {
 		refuse(w, 409)
 		return
@@ -36,7 +41,7 @@ func (s *Server) retire(w http.ResponseWriter, r *http.Request) {
 	reply(w, map[string]bool{"retired": true})
 }
 func (s *Server) retireHistory(request retirement) error {
-	if !uuidPattern.MatchString(request.BatchID) || !digestPattern.MatchString(request.RuntimeKey) || (request.Operation != "recover" && request.Operation != "cancel" && request.Operation != "archive-dispute") {
+	if !uuidPattern.MatchString(request.BatchID) || !digestPattern.MatchString(request.RuntimeKey) || (request.Operation != "recover" && request.Operation != "history-recover" && request.Operation != "cancel" && request.Operation != "archive-dispute") {
 		return ErrInvalid
 	}
 	var archive disputeArchiveResult
@@ -44,6 +49,22 @@ func (s *Server) retireHistory(request retirement) error {
 	var err error
 	if request.Operation == "archive-dispute" {
 		archive, err = s.verifyDisputeArchive(request)
+	} else if request.Operation == "history-recover" {
+		var ownerRecord OwnerRecord
+		if strict(request.Proof.Record, &ownerRecord) != nil {
+			return ErrInvalid
+		}
+		var result struct {
+			BatchID        string   `json:"batch_id"`
+			TerminalSHA256 string   `json:"terminal_sha256"`
+			Counters       Counters `json:"counters"`
+			Billable       int64    `json:"billable"`
+			PolicySHA256   string   `json:"policy_sha256"`
+		}
+		if strict(ownerRecord.Result, &result) != nil {
+			return ErrInvalid
+		}
+		raw, err = VerifyOwner(request.Proof, s.owner, s.binding, request.Operation, map[string]string{"batch_id": request.BatchID, "runtime_key": request.RuntimeKey, "terminal_sha256": result.TerminalSHA256})
 	} else {
 		raw, err = VerifyOwner(request.Proof, s.owner, s.binding, request.Operation, map[string]string{"batch_id": request.BatchID})
 	}
@@ -52,7 +73,7 @@ func (s *Server) retireHistory(request retirement) error {
 	}
 	var terminal string
 	var recovered Counters
-	if request.Operation == "recover" {
+	if request.Operation == "recover" || request.Operation == "history-recover" {
 		var result struct {
 			BatchID        string   `json:"batch_id"`
 			TerminalSHA256 string   `json:"terminal_sha256"`
@@ -99,7 +120,7 @@ func (s *Server) retireHistory(request retirement) error {
 			if err = s.matchDisputeArchive(request, entry, archive); err != nil {
 				return err
 			}
-		} else if request.Operation == "recover" {
+		} else if request.Operation == "recover" || request.Operation == "history-recover" {
 			if entry.Phase != "terminal" || len(entry.Records) == 0 {
 				return ErrDisputed
 			}

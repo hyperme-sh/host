@@ -102,13 +102,23 @@ uses 64 zeroes). The manifest covers both an interrupted start response and an
 interrupted running request. A local terminal tail lost before owner acceptance
 can also be archived; an owner-anchored terminal must use ordinary recovery.
 
-Plane #161 must implement durable storage of the complete original `Entry` and
-its owner authority state before issuing this proof, with a permanent fence
-against further start/renew/checkpoint or settlement of the disputed batch.
-Archive replay must survive restart and revocation. Host implements only this
-proof consumer; its unit signer substitutes for that pending owner API.
-Gateway #70/#69 must retrieve and commit the archive before requesting retirement.
-The profile and digest billing stay disabled until those dependencies are ready.
+Plane retains the complete original `Entry` and owner state before signing
+an archive proof, permanently fencing the disputed batch. Gateway #69 consumes
+this archive before requesting local retirement.
+
+Historical access uses `/history/channels/challenge` with `batch_id` and
+`historical_runtime_key`, then `/history/channels/authorize` with the nonce and
+Plane's `history-channel` proof. The proof binds the original journal, full
+workload binding, current serving guest key and actual Gateway TLS key. Its
+30-second maximum window uses protected time. Historical tokens authorize only
+`/status` and `/retire` for that batch and original key; they cannot quote or
+execute work. Ordinary channel operations reject historical nonces and tokens.
+
+Retirement still requires a separate matching owner proof. `history-recover`
+proofs bind the original runtime key and exact terminal hash already stored by
+Plane; no new counts are accepted after trust withdrawal. Replay supports a lost
+retirement acknowledgement. Missing or unanchored history requires durable
+owner dispute archival. Digest billing remains disabled by default.
 
 Host dispatch requires `runtime` and `backend` equal to `sev-snp-cpu`, the full
 `trusted_meter` binding, and `HYPERMESH_TRUSTED_METER_BUNDLE` pointing to a

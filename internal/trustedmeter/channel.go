@@ -23,10 +23,12 @@ type ChannelResult struct {
 type pendingChannel struct {
 	request ChannelRequest
 	before  time.Duration
+	history *HistoryScope
 }
 type activeChannel struct {
 	peer     string
 	deadline time.Duration
+	history  *HistoryScope
 }
 
 // Channels binds fresh owner authorizations to the actual TLS peer's Ed25519
@@ -97,7 +99,7 @@ func (c *Channels) Challenge(peer ed25519.PublicKey) (ChannelRequest, error) {
 		return ChannelRequest{}, err
 	}
 	request := ChannelRequest{Nonce: nonce, RuntimeKey: hex.EncodeToString(c.runtime), GatewayKey: hex.EncodeToString(peer)}
-	c.pending[nonce] = pendingChannel{request, before}
+	c.pending[nonce] = pendingChannel{request: request, before: before}
 	return request, nil
 }
 func (c *Channels) Authorize(peer ed25519.PublicKey, nonce string, proof Signed) (string, error) {
@@ -108,7 +110,7 @@ func (c *Channels) Authorize(peer ed25519.PublicKey, nonce string, proof Signed)
 		return "", err
 	}
 	p, ok := c.pending[nonce]
-	if !ok || len(peer) != 32 || p.request.GatewayKey != hex.EncodeToString(peer) {
+	if !ok || p.history != nil || len(peer) != 32 || p.request.GatewayKey != hex.EncodeToString(peer) {
 		return "", ErrInvalid
 	}
 	delete(c.pending, nonce)
@@ -134,7 +136,7 @@ func (c *Channels) Authorize(peer ed25519.PublicKey, nonce string, proof Signed)
 	if err != nil {
 		return "", err
 	}
-	c.active[token] = activeChannel{hex.EncodeToString(peer), deadline}
+	c.active[token] = activeChannel{peer: hex.EncodeToString(peer), deadline: deadline}
 	return token, nil
 }
 func (c *Channels) Check(peer ed25519.PublicKey, token string) error {
@@ -144,7 +146,7 @@ func (c *Channels) Check(peer ed25519.PublicKey, token string) error {
 		return err
 	}
 	a, ok := c.active[token]
-	if !ok || len(peer) != 32 || a.peer != hex.EncodeToString(peer) {
+	if !ok || a.history != nil || len(peer) != 32 || a.peer != hex.EncodeToString(peer) {
 		return ErrInvalid
 	}
 	return nil

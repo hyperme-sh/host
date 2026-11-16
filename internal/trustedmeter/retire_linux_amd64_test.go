@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -135,5 +137,67 @@ func TestJournalByteReservationsIncludeAtomicReplacementAndHostHistory(t *testin
 	f.Close()
 	if ReserveHostJournal(state, binding().LeaseID) == nil {
 		t.Fatal("unbounded host history")
+	}
+}
+
+func TestHistoricalRecoveryProofBindsOriginalKeyAndTerminal(t *testing.T) {
+	pub, key, _ := ed25519.GenerateKey(rand.Reader)
+	owner, ownerKey, _ := ed25519.GenerateKey(rand.Reader)
+	s := &Server{binding: binding(), key: key, owner: owner, stateDir: t.TempDir()}
+	j, err := s.requestJournal(pub, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.Begin(batch, epoch) != nil || j.Started(batch, start) != nil {
+		t.Fatal("start")
+	}
+	c := checkpoint()
+	final, _ := Sign(c, key)
+	if err = j.Append(batch, final); err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := Hash(final.Record)
+	billable, _ := c.Counters.Billable()
+	result, _ := json.Marshal(map[string]any{"batch_id": batch, "terminal_sha256": hash, "counters": c.Counters, "billable": billable, "policy_sha256": PolicySHA256})
+	requestHash, _ := Hash(map[string]string{"batch_id": batch, "runtime_key": hex.EncodeToString(pub), "terminal_sha256": hash})
+	b := binding()
+	raw, _ := canonicalValue(OwnerRecord{Kind: "owner-meter-v1", Operation: "history-recover", TenantID: b.TenantID, LeaseID: b.LeaseID, GatewayID: b.GatewayID, RequestSHA256: requestHash, Result: result})
+	proof := Signed{raw, hex.EncodeToString(ed25519.Sign(ownerKey, append([]byte(ownerDomain), raw...)))}
+	request := retirement{batch, hex.EncodeToString(pub), "history-recover", proof}
+	wrong := request
+	wrong.RuntimeKey = hex.EncodeToString(owner)
+	if s.retireHistory(wrong) == nil {
+		t.Fatal("wrong original key")
+	}
+	if err = s.retireHistory(request); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.retireHistory(request); err != nil {
+		t.Fatal("lost acknowledgement", err)
+	}
+}
+
+// A client body reader must never run while retirement holds execution.
+type lockCheckingBody struct {
+	t      *testing.T
+	server *Server
+}
+
+func (b lockCheckingBody) Read(p []byte) (int, error) {
+	if !b.server.execution.TryLock() {
+		b.t.Fatal("unauthenticated body holds execution lock")
+	}
+	b.server.execution.Unlock()
+	return 0, io.EOF
+}
+func (b lockCheckingBody) Close() error { return nil }
+func TestRetirementReadsBeforeExecutionLock(t *testing.T) {
+	s := &Server{}
+	request := httptest.NewRequest("POST", "/retire", nil)
+	request.Body = lockCheckingBody{t, s}
+	response := httptest.NewRecorder()
+	s.retire(response, request)
+	if response.Code != 400 {
+		t.Fatal(response.Code)
 	}
 }

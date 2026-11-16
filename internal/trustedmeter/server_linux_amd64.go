@@ -111,6 +111,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
+	case "/history/channels/challenge":
+		raw, err := readBody(r, 1024)
+		var scope HistoryScope
+		if err != nil || strict(raw, &scope) != nil {
+			refuse(w, 400)
+			return
+		}
+		request, err := s.channels.HistoryChallenge(peer, scope)
+		if err != nil {
+			refuse(w, 409)
+			return
+		}
+		reply(w, request)
+		return
 	case "/channels/challenge":
 		raw, err := readBody(r, 2)
 		if err != nil || (len(raw) != 0 && string(raw) != "{}") {
@@ -124,7 +138,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		reply(w, request)
 		return
-	case "/channels/authorize":
+	case "/channels/authorize", "/history/channels/authorize":
 		raw, err := readBody(r, 16384)
 		if err != nil {
 			refuse(w, 400)
@@ -138,7 +152,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			refuse(w, 400)
 			return
 		}
-		token, err := s.channels.Authorize(peer, request.Nonce, request.Proof)
+		var token string
+		if r.URL.Path == "/history/channels/authorize" {
+			token, err = s.channels.HistoryAuthorize(peer, request.Nonce, request.Proof)
+		} else {
+			token, err = s.channels.Authorize(peer, request.Nonce, request.Proof)
+		}
 		if err != nil {
 			refuse(w, 403)
 			return
@@ -146,7 +165,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]string{"channel": token})
 		return
 	}
-	if s.channels.Check(peer, r.Header.Get("X-Hypermesh-Meter-Channel")) != nil {
+	if r.URL.Path != "/status" && r.URL.Path != "/retire" && s.channels.Check(peer, r.Header.Get("X-Hypermesh-Meter-Channel")) != nil {
 		refuse(w, 403)
 		return
 	}
@@ -186,6 +205,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			refuse(w, 400)
 			return
 		}
+		if s.checkHistoryAccess(r, peer, "status", request.BatchID, request.RuntimeKey) != nil {
+			refuse(w, 403)
+			return
+		}
 		key, _ := hex.DecodeString(request.RuntimeKey)
 		// Each request has its own bounded file. Historical public keys still
 		// require verification against Plane's original session and count anchor.
@@ -199,7 +222,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			refuse(w, 409)
 			return
 		}
-		if s.channels.Check(peer, r.Header.Get("X-Hypermesh-Meter-Channel")) != nil {
+		if s.checkHistoryAccess(r, peer, "status", request.BatchID, request.RuntimeKey) != nil {
 			refuse(w, 403)
 			return
 		}
@@ -392,4 +415,12 @@ func (s *Server) requestJournal(key ed25519.PublicKey, batchID string) (*Journal
 		return nil, err
 	}
 	return OpenJournal(path, s.binding, key)
+}
+
+func (s *Server) checkHistoryAccess(r *http.Request, peer ed25519.PublicKey, operation, batch, runtime string) error {
+	token := r.Header.Get("X-Hypermesh-Meter-Channel")
+	if s.channels.Check(peer, token) == nil {
+		return nil
+	}
+	return s.channels.CheckHistory(peer, token, operation, batch, runtime)
 }
