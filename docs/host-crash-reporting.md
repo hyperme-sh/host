@@ -4,6 +4,8 @@ Go runtime supervision is implemented on Linux and macOS. Other builds,
 including Windows, ignore optional Go crash-reporting configuration and keep
 ordinary Host startup available. This does not enable Windows Go crash capture
 or change the separate Windows signing service or native reporting sender.
+The full Windows Go agent still requires a separate port of Unix-only disk APIs;
+the Windows CI check here covers the isolated crash-monitor contract.
 
 This optional configured path uses accepted Host Terms of Service, without an
 additional consent prompt. Visor retains its separate consent rules. It requires
