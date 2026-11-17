@@ -16,8 +16,15 @@ func TestCrashRegistrationBindsMachineAndApprovedHash(t *testing.T) {
 	event, hash := strings.Repeat("a", 32), strings.Repeat("b", 64)
 	calls := 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/hypermesh/agent/crashes/grant" {
+			if r.Header.Get("Authorization") != "Bearer hm_msi_private" {
+				t.Error("missing machine identity at Plane")
+			}
+			json.NewEncoder(w).Encode(map[string]any{"version": 1, "grant": "hm_crash_scoped"})
+			return
+		}
 		calls++
-		if r.URL.Path != "/api/crash/register" || r.Header.Get("Authorization") != "Bearer hm_msi_private" {
+		if r.URL.Path != "/api/crash/register" || r.Header.Get("Authorization") != "Bearer hm_crash_scoped" {
 			t.Error("wrong authority")
 		}
 		var body map[string]any
@@ -36,7 +43,7 @@ func TestCrashRegistrationBindsMachineAndApprovedHash(t *testing.T) {
 	old := http.DefaultTransport
 	http.DefaultTransport = server.Client().Transport
 	defer func() { http.DefaultTransport = old }()
-	b := &Bridge{config: Config{ClientUID: 1000, Tenant: "tenant", Device: "device", CrashRegistrationURL: server.URL + "/api/crash/register"}, now: func() time.Time { return now }, busy: make(chan struct{}, 1), credential: func(context.Context) (string, error) { return "hm_msi_private", nil }}
+	b := &Bridge{config: Config{Base: server.URL, ClientUID: 1000, Tenant: "tenant", Device: "device", CrashRegistrationURL: server.URL + "/api/crash/register"}, now: func() time.Time { return now }, busy: make(chan struct{}, 1), credential: func(context.Context) (string, error) { return "hm_msi_private", nil }}
 	claim := crashClaim{1, event, now.Add(-time.Minute).Format(time.RFC3339), hash}
 	call := func(raw []byte, uid uint32) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "/crash-register", bytes.NewReader(raw))

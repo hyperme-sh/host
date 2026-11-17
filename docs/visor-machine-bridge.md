@@ -73,9 +73,11 @@ Optional root-managed `crash_registration_url` must be an HTTPS URL with path
 `/api/crash/register`. Omission disables the operation. The configured non-root
 Visor account may POST `/crash-register` on the existing kernel-authenticated
 local bridge with version 1, event_id, captured_at (original UTC ending in Z), and
-payload_sha256. Host adds its own tenant/device and current enrolled credential;
-no credential is returned to Visor. Invalid/future or 24-hour-old claims fail.
-The backend verifies current identity through Plane and derives the owner/project.
+payload_sha256. Host exchanges its enrolled credential only at its configured
+HTTPS Plane origin for a 60-second exact-event crash grant (Plane #187). Only that
+crash-scoped grant is sent to the broker; neither credential is returned to Visor.
+Invalid/future or 24-hour-old claims fail. The backend verifies the grant signature
+and current-at-issuance owner/device binding, then derives the declared project.
 
 The response must match the machine, event, time and hash. Visor also checks the
 subject and DSN project before sending the exact approved bytes. The relay has
