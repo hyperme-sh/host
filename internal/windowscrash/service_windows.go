@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -131,8 +132,8 @@ func load() (Config, func(), error) {
 
 func pipeDescriptor(sid string) (string, error) {
 	parsed, err := windows.StringToSid(sid)
-	// Only explicit local/domain account SIDs, never groups or service identities.
-	if err != nil || parsed.String() != sid || !strings.HasPrefix(sid, "S-1-5-21-") || parsed.SubAuthorityCount() != 5 {
+	// Account-shaped local/domain SIDs; token-user equality rejects group use.
+	if err != nil || parsed.String() != sid || !strings.HasPrefix(sid, "S-1-5-21-") || len(strings.Split(sid, "-")) != 8 {
 		return "", errRefused
 	}
 	// 0x12019b grants read/write data and attributes, but not CREATE_PIPE_INSTANCE.
@@ -153,8 +154,12 @@ func tokenAllowed(token windows.Token, sid string) bool {
 		return false
 	}
 	label := (*windows.Tokenmandatorylabel)(unsafe.Pointer(&buf[0]))
-	count := label.Label.Sid.SubAuthorityCount()
-	return count > 0 && label.Label.Sid.SubAuthority(uint32(count-1)) >= 0x2000
+	value := label.Label.Sid.String()
+	if !strings.HasPrefix(value, "S-1-16-") {
+		return false
+	}
+	level, err := strconv.ParseUint(strings.TrimPrefix(value, "S-1-16-"), 10, 32)
+	return err == nil && level >= 0x2000
 }
 func clientAllowed(handle windows.Handle, sid string) bool {
 	runtime.LockOSThread()
