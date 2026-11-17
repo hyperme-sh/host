@@ -278,7 +278,6 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -292,8 +291,38 @@ jobs:
           docker build --target contracts --build-arg "HOST_REV=$HOST_REV" -f deploy/native-crash/Dockerfile.sdk -t "${IMAGE/crash-sdk/crash-contract}" .
           # SDK base is a build-contract substitute, not GPU/model qualification.
           docker build --build-arg "SDK_IMAGE=$IMAGE" --build-arg "WORKER_IMAGE=$IMAGE" -f deploy/native-crash/Dockerfile.worker -t host-worker-overlay-contract .
+
+  publish-linux-crash-image:
+    name: Publish Linux crash TEST image (${{ matrix.arch }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [go, actionlint, container-cleanup-contract, linux-crash-image]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Rebuild validated main source for publication
+        env:
+          HOST_REV: ${{ github.sha }}
+          IMAGE: ghcr.io/hyperme-sh/host/crash-sdk:test-${{ matrix.arch }}
+        run: |
+          docker build --target runtime --build-arg "HOST_REV=$HOST_REV" -f deploy/native-crash/Dockerfile.sdk -t "$IMAGE" .
+          docker build --target contracts --build-arg "HOST_REV=$HOST_REV" -f deploy/native-crash/Dockerfile.sdk -t "${IMAGE/crash-sdk/crash-contract}" .
+          # SDK base is a build-contract substitute, not GPU/model qualification.
+          docker build --build-arg "SDK_IMAGE=$IMAGE" --build-arg "WORKER_IMAGE=$IMAGE" -f deploy/native-crash/Dockerfile.worker -t host-worker-overlay-contract .
       - name: Publish moving TEST runtime channel
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
