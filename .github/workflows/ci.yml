@@ -245,7 +245,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: hyperme-sh/visor
-          ref: 8ee6c74fc23d5d895a89db594b25356bbd4506fd
+          ref: 5ab6b90b19edfb2b5e59ef1ff3e107baee949bd7
           path: native-authority-source
           persist-credentials: false
       - name: Build disabled worker adapter and SDK option contracts
@@ -269,4 +269,6 @@ jobs:
         with:
           persist-credentials: false
       - name: Test kernel identity and bounded cleanup transport
-        run: cargo test --locked --manifest-path native/crash-adapter/Cargo.toml --lib
+        run: |
+          cargo test --locked --manifest-path native/crash-adapter/Cargo.toml --lib
+          cargo build --locked --manifest-path native/crash-adapter/Cargo.toml --bin host-container-cleanup
