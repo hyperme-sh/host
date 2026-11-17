@@ -166,23 +166,25 @@ func (m *ContainerManager) Start(ctx context.Context, run func(context.Context, 
 		s.abort()
 		return nil, err
 	}
-	out, err := run(ctx, launch...)
-	if err != nil {
-		s.abort()
-		return nil, err
-	}
-	id := strings.TrimSpace(string(out))
-	if !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(id) {
-		s.abort()
-		return nil, ErrUnavailable
-	}
+	// Docker writes the exact created ID even if its response is interrupted.
+	// This path is Host-owned; the worker sees the control mount read-only.
+	cidfile := filepath.Join(s.mounts.Control, "docker.cid")
+	launch = append([]string{launch[0], "--cidfile", cidfile}, launch[1:]...)
+	out, launchErr := run(ctx, launch...)
+	cid, readErr := os.ReadFile(cidfile)
+	id := strings.TrimSpace(string(cid))
+	validID := regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(id)
 	fail := func() ([]byte, error) {
 		s.abort()
-		clean, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_, _ = run(clean, "stop", id)
-		_, _ = run(clean, "rm", id)
+		if validID {
+			clean, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, _ = run(clean, "rm", "-f", id)
+		}
 		return nil, ErrUnavailable
+	}
+	if launchErr != nil || readErr != nil || !validID || strings.TrimSpace(string(out)) != id {
+		return fail()
 	}
 	raw, err := run(ctx, "inspect", "--format", "{{json .}}", id)
 	if err != nil {
