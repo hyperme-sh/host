@@ -1,6 +1,6 @@
 module github.com/FyberLabs/hypermesh-host
 
-go 1.22
+go 1.23.0
 
 require (
 	github.com/google/go-sev-guest v0.15.0
