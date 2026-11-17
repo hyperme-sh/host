@@ -73,3 +73,22 @@ func TestCrashRegistrationBindsMachineAndApprovedHash(t *testing.T) {
 		t.Fatal("missing config accepted")
 	}
 }
+
+func TestCrashOnlyHandlerHasNoDispatcher(t *testing.T) {
+	calls := 0
+	h, err := NewCrashHandler("https://plane.invalid", "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "https://broker.invalid/api/crash/register", func(context.Context) (string, error) { calls++; return "", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/review", "/capabilities", "/dispatch", "/crash-register?extra=1"} {
+		r := httptest.NewRequest("POST", path, strings.NewReader("{}"))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 404 {
+			t.Fatalf("unexpected route: %s", path)
+		}
+	}
+	if calls != 0 {
+		t.Fatal("unrelated routes accessed credentials")
+	}
+}

@@ -135,3 +135,24 @@ func (b *Bridge) crashRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write(result)
 }
+
+// NewCrashHandler exposes only registration. The transport must authenticate the
+// local caller before invoking it; no dispatcher or general signing route exists.
+func NewCrashHandler(base, tenant, device, endpoint string, credential func(context.Context) (string, error)) (http.Handler, error) {
+	plane, err := url.Parse(base)
+	broker, be := url.Parse(endpoint)
+	uuid := regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
+	if err != nil || be != nil || credential == nil || !uuid.MatchString(tenant) || !uuid.MatchString(device) ||
+		plane.Scheme != "https" || plane.Host == "" || plane.User != nil || plane.RawQuery != "" || plane.Fragment != "" || (plane.Path != "" && plane.Path != "/") ||
+		broker.Scheme != "https" || broker.Host == "" || broker.User != nil || broker.RawQuery != "" || broker.Fragment != "" || broker.Path != "/api/crash/register" {
+		return nil, refused
+	}
+	b := &Bridge{config: Config{Base: base, Tenant: tenant, Device: device, CrashRegistrationURL: endpoint}, credential: credential, now: time.Now, busy: make(chan struct{}, 8)}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/crash-register" || r.URL.RawQuery != "" {
+			http.Error(w, "Unavailable", http.StatusNotFound)
+			return
+		}
+		b.crashRegister(w, r)
+	}), nil
+}
