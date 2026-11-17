@@ -138,3 +138,42 @@ func TestCancelledReducerDoesNotReadRawData(t *testing.T) {
 		t.Fatal("cancelled reduction accepted")
 	}
 }
+
+func TestCancelledCollectionWaitsIndependentlyForCleanupLock(t *testing.T) {
+	directory, id, run := fixture(t)
+	held, err := lock(context.Background(), directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan error, 1)
+	go func() {
+		reports, err := collectContext(ctx, directory, id)
+		if len(reports) != 0 {
+			done <- nil
+			return
+		}
+		done <- err
+	}()
+	select {
+	case <-done:
+		t.Fatal("cancellation skipped the independent cleanup lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled collection succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cleanup did not resume after lock release")
+	}
+	if _, err := os.Lstat(run); !os.IsNotExist(err) {
+		t.Fatal("contended cancelled run not purged")
+	}
+}

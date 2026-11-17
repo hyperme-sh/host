@@ -166,7 +166,15 @@ func collectContext(parent context.Context, directory, id string) (reports []Rep
 		}
 	}
 	capture, e := lock(ctx, directory)
+	if e != nil && ctx.Err() != nil {
+		// A canceled caller cannot skip cleanup while the stopped handler
+		// releases its lock. Never purge through another live writer's lock.
+		cleanup, stopCleanup := context.WithTimeout(context.Background(), 5*time.Second)
+		capture, e = lock(cleanup, directory)
+		stopCleanup()
+	}
 	if e != nil {
+		// The stop marker remains for the independent OS cleanup service.
 		return nil, ErrUnavailable
 	}
 	defer capture.Close()
