@@ -152,12 +152,15 @@ func tokenAllowed(token windows.Token, sid string) bool {
 		return false
 	}
 	var needed uint32
-	buf := make([]byte, 512)
-	if windows.GetTokenInformation(token, windows.TokenIntegrityLevel, &buf[0], uint32(len(buf)), &needed) != nil {
+	// The native structure contains pointers and requires pointer alignment.
+	var buf struct {
+		label windows.Tokenmandatorylabel
+		extra [512]byte
+	}
+	if windows.GetTokenInformation(token, windows.TokenIntegrityLevel, (*byte)(unsafe.Pointer(&buf)), uint32(unsafe.Sizeof(buf)), &needed) != nil {
 		return false
 	}
-	label := (*windows.Tokenmandatorylabel)(unsafe.Pointer(&buf[0]))
-	value := label.Label.Sid.String()
+	value := buf.label.Label.Sid.String()
 	if !strings.HasPrefix(value, "S-1-16-") {
 		return false
 	}
