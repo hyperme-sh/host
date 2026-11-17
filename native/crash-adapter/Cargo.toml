@@ -8,8 +8,8 @@ publish = false
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-hypermesh-crash-retention = { git = "https://github.com/hyperme-sh/visor", rev = "5ab6b90b19edfb2b5e59ef1ff3e107baee949bd7" }
-hypermesh-local-storage = { git = "https://github.com/hyperme-sh/visor", rev = "5ab6b90b19edfb2b5e59ef1ff3e107baee949bd7" }
+hypermesh-crash-retention = { git = "https://github.com/hyperme-sh/visor", rev = "9a08ee1601f8559535ca03f255cc7719fc7f7447" }
+hypermesh-local-storage = { git = "https://github.com/hyperme-sh/visor", rev = "9a08ee1601f8559535ca03f255cc7719fc7f7447" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }

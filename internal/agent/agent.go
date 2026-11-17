@@ -226,6 +226,9 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		ingressIface = wg.Iface
 		log.Info("userspace wireguard", "service", tunnel.UserspaceService(), "iface", wg.Iface)
 	}
+    capture := nativeContainer(cfg)
+    nvidia, hip, cpu := runtime.NewNVIDIA(), runtime.NewHIP(), runtime.NewCPU()
+    nvidia.Capture, hip.Capture, cpu.Capture = capture, capture, capture
 	return &Agent{
 		cfg:    cfg,
 		client: machineAPIClient(cfg),
@@ -235,8 +238,9 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 			Endpoint:  cfg.CompletionsEndpoint(),
 			Store:     pathb.FileStore{Dir: cfg.StateDir},
 		},
-		runtime:      runtime.NewNVIDIA(),
-		hip:          runtime.NewHIP(),
+		runtime:      nvidia,
+		hip:          hip,
+        cpu:          cpu,
 		metal:        nativeMetal(cfg),
 		tunnels:      wg,
 		keyDir:       keyDirFor(cfg),

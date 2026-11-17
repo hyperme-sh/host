@@ -1,0 +1,10 @@
+# Preserve the chosen CPU/NVIDIA/ROCm model image and its accelerator ABI.
+# The caller selects its existing moving TEST image; no model or driver swap.
+ARG TARGETARCH
+ARG SDK_IMAGE=ghcr.io/hyperme-sh/host/crash-sdk:test-${TARGETARCH}
+ARG WORKER_IMAGE
+FROM ${SDK_IMAGE} AS sdk
+FROM ${WORKER_IMAGE}
+COPY --from=sdk /usr/local/libexec/hypermesh/crash-sdk/ /usr/local/libexec/hypermesh/crash-sdk/
+# No DSN, credentials, capture toggle, entrypoint or network settings are added.
+# Host enables the library only after preparing its private cleanup helper.
