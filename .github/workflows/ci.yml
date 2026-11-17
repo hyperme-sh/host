@@ -233,6 +233,8 @@ jobs:
         run: go build -o "$env:RUNNER_TEMP/hypermesh-feedback-service.exe" ./cmd/hypermesh-feedback-service
       - name: Test storage and pipe contracts
         run: go test -race ./internal/windowsprivate ./internal/windowscrash ./internal/windowsfeedback
+      - name: Unsupported Go crash monitor capability contract
+        run: go test -race ./internal/hostcrash
       - name: Test LocalSystem signing checkpoint contract
         run: ./scripts/windows/test-system-contract.ps1
 

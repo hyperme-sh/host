@@ -15,6 +15,11 @@ import (
 // that records acceptance of the current Host terms. No extra consent UI applies
 // to Host analytics. Visor's independent consent policy is unchanged.
 func CrashReporter(cfg Config) (func(time.Time), error) {
+	// Optional Go reporting must not send an unsupported platform into the
+	// monitor startup failure path. Native senders have their own capabilities.
+	if !hostcrash.MonitorSupported() {
+		return nil, nil
+	}
 	send, err := crashSender(cfg)
 	if err != nil || send == nil {
 		return nil, err
