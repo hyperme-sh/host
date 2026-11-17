@@ -31,6 +31,19 @@ type Event struct {
 // NewEvent accepts no raw crash text. Runtime crash output only establishes that
 // a fatal Go failure occurred; its contents never enter the event.
 func NewEvent(tenant string, captured time.Time) (Event, error) {
+	return newEvent(tenant, captured, "go", "go_runtime_crash", "Host Go runtime terminated unexpectedly")
+}
+
+// NewNativeEvent accepts only a fixed classification from the local reducer.
+func NewNativeEvent(tenant string, captured time.Time, code string) (Event, error) {
+	switch code {
+	case "invalid_memory_access", "illegal_instruction", "arithmetic_fault":
+	default:
+		code = "native_crash"
+	}
+	return newEvent(tenant, captured, "native", code, "Host native worker terminated unexpectedly")
+}
+func newEvent(tenant string, captured time.Time, platform, code, message string) (Event, error) {
 	if !uuidPattern.MatchString(tenant) {
 		return Event{}, ErrUnavailable
 	}
@@ -48,9 +61,9 @@ func NewEvent(tenant string, captured time.Time) (Event, error) {
 		tags["channel"] = channel
 	}
 	body, err := json.Marshal(map[string]any{
-		"event_id": event.ID, "timestamp": event.Captured, "platform": "go", "level": "fatal",
-		"release": "hypermesh-host@" + release, "message": "Host Go runtime terminated unexpectedly",
-		"exception": map[string]any{"values": []map[string]string{{"type": "go_runtime_crash"}}},
+		"event_id": event.ID, "timestamp": event.Captured, "platform": platform, "level": "fatal",
+		"release": "hypermesh-host@" + release, "message": message,
+		"exception": map[string]any{"values": []map[string]string{{"type": code}}},
 		"tags":      tags,
 	})
 	if err != nil {
