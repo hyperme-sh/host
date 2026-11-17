@@ -13,10 +13,15 @@ import (
 	"syscall"
 
 	"github.com/FyberLabs/hypermesh-host/internal/agent"
+	"github.com/FyberLabs/hypermesh-host/internal/hostcrash"
 	"github.com/FyberLabs/hypermesh-host/internal/logsafe"
 )
 
 func main() {
+	crashChild, crashErr := hostcrash.BindChild()
+	if crashErr != nil {
+		os.Exit(2)
+	}
 	log := logsafe.New()
 	// Launchd has no EnvironmentFile. The same /etc/hypermesh/agent.env
 	// systemd loads on Linux is applied here when a key is still unset.
@@ -82,6 +87,21 @@ func main() {
 	if err := agent.ApplyLicenseFlag(&cfg, *license); err != nil {
 		log.Error("could not start on this box", "err", err)
 		os.Exit(2)
+	}
+
+	if !crashChild {
+		reporter, err := agent.CrashReporter(cfg)
+		if err != nil {
+			log.Warn("host crash reporting unavailable")
+		}
+		if reporter != nil {
+			code, err := hostcrash.Monitor(reporter)
+			if err != nil {
+				log.Error("host crash monitor could not start")
+				os.Exit(2)
+			}
+			os.Exit(code)
+		}
 	}
 
 	a, err := agent.New(cfg, log)
