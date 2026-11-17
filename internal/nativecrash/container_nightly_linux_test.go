@@ -148,6 +148,10 @@ func TestContainerCrashNightly(t *testing.T) {
 		t.Fatal("kernel raw storage cap not enforced")
 	}
 	outcomes["kernel-storage-bound"] = "passed"
+	// Free and verify storage before testing the independent authority failure.
+	if _, err := docker(ctx, "exec", second, "sh", "-ec", "rm /var/lib/hypermesh-crash/database/quota-probe; dd if=/dev/zero of=/var/lib/hypermesh-crash/database/available-probe bs=1048576 count=16 status=none; rm /var/lib/hypermesh-crash/database/available-probe"); err != nil {
+		t.Fatal("storage unavailable before service-loss check")
+	}
 	if exec.CommandContext(ctx, "systemctl", "stop", "hypermesh-host-crash-retention.service").Run() != nil {
 		t.Fatal("service stop failed")
 	}
