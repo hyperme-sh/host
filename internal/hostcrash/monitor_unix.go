@@ -15,6 +15,9 @@ import (
 
 const childMarker = "HYPERMESH_INTERNAL_CRASH_CHILD"
 
+// MonitorSupported reports whether this build can supervise Go runtime crashes.
+func MonitorSupported() bool { return true }
+
 // BindChild installs the Go runtime's private crash pipe in the reexecuted
 // agent. No normal stderr, returned error or exit status is a crash assertion.
 func BindChild() (bool, error) {
