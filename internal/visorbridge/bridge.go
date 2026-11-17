@@ -37,20 +37,21 @@ type Call struct {
 }
 
 type Config struct {
-	Schema            int             `json:"schema"`
-	ClientUID         uint32          `json:"client_uid"`
-	Socket            string          `json:"socket"`
-	Conductor         string          `json:"conductor"`
-	AuthorityURL      string          `json:"authority_url"`
-	DispatchConfig    string          `json:"dispatch_config"`
-	Base              string          `json:"base"`
-	Tenant            string          `json:"tenant"`
-	Device            string          `json:"device"`
-	Identity          string          `json:"identity"`
-	WireGuardKey      string          `json:"wireguard_key,omitempty"`
-	Enabled           []Binding       `json:"enabled"`
-	MachinePrompt     *PromptConfig   `json:"machine_prompt,omitempty"`
-	PermissionPreview *PreviewBinding `json:"permission_preview,omitempty"`
+	CrashRegistrationURL string          `json:"crash_registration_url,omitempty"`
+	Schema               int             `json:"schema"`
+	ClientUID            uint32          `json:"client_uid"`
+	Socket               string          `json:"socket"`
+	Conductor            string          `json:"conductor"`
+	AuthorityURL         string          `json:"authority_url"`
+	DispatchConfig       string          `json:"dispatch_config"`
+	Base                 string          `json:"base"`
+	Tenant               string          `json:"tenant"`
+	Device               string          `json:"device"`
+	Identity             string          `json:"identity"`
+	WireGuardKey         string          `json:"wireguard_key,omitempty"`
+	Enabled              []Binding       `json:"enabled"`
+	MachinePrompt        *PromptConfig   `json:"machine_prompt,omitempty"`
+	PermissionPreview    *PreviewBinding `json:"permission_preview,omitempty"`
 }
 
 type Result struct {
@@ -267,6 +268,10 @@ func (b *Bridge) Handler() http.Handler {
 				return
 			}
 			json.NewEncoder(w).Encode(result)
+			return
+		}
+		if r.URL.Path == "/crash-register" && r.Method == "POST" {
+			b.crashRegister(w, r)
 			return
 		}
 		if r.URL.Path == "/permission-context" && r.Method == "GET" {

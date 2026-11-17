@@ -66,3 +66,20 @@ The bridge never runs tool programs itself. Its fixed Conductor dispatcher uses 
 locks, current preconditions, physical limits, cancellation and duplicate-call
 prevention. A review cannot relax those controls. No systemd unit, sudo grant,
 listener, package update or machine-key change is installed by this code change.
+
+## Crash registration
+
+Optional root-managed `crash_registration_url` must be an HTTPS URL with path
+`/api/crash/register`. Omission disables the operation. The configured non-root
+Visor account may POST `/crash-register` on the existing kernel-authenticated
+local bridge with version 1, event_id, captured_at (original UTC ending in Z), and
+payload_sha256. Host adds its own tenant/device and current enrolled credential;
+no credential is returned to Visor. Invalid/future or 24-hour-old claims fail.
+The backend verifies current identity through Plane and derives the owner/project.
+
+The response must match the machine, event, time and hash. Visor also checks the
+subject and DSN project before sending the exact approved bytes. The relay has
+bounded time, size and concurrency, refuses redirects and environment proxies,
+and never accepts a raw dump. The caller is the configured local account; this
+is not physical crash or trusted-clock attestation. All capture consent remains
+local. No configuration enables collection or digest activation in this change.
