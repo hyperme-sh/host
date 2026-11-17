@@ -37,6 +37,7 @@ type Call struct {
 }
 
 type Config struct {
+	FeedbackGrants       bool            `json:"feedback_grants,omitempty"`
 	CrashRegistrationURL string          `json:"crash_registration_url,omitempty"`
 	Schema               int             `json:"schema"`
 	ClientUID            uint32          `json:"client_uid"`
@@ -268,6 +269,10 @@ func (b *Bridge) Handler() http.Handler {
 				return
 			}
 			json.NewEncoder(w).Encode(result)
+			return
+		}
+		if r.URL.Path == "/feedback-grant" && r.Method == "POST" {
+			b.feedback(w, r)
 			return
 		}
 		if r.URL.Path == "/crash-register" && r.Method == "POST" {
