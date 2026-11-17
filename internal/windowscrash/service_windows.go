@@ -33,7 +33,10 @@ const ServiceName = "HypermeshCrashRegistration"
 const PipeName = `\\.\pipe\hypermesh-crash-registration-v1`
 
 var errRefused = errors.New("Windows crash registration refused")
-var impersonate = windows.NewLazySystemDLL("advapi32.dll").NewProc("ImpersonateNamedPipeClient")
+var securityAPI = windows.NewLazySystemDLL("advapi32.dll")
+var impersonate = securityAPI.NewProc("ImpersonateNamedPipeClient")
+var openThreadToken = securityAPI.NewProc("OpenThreadToken")
+var revertToSelf = securityAPI.NewProc("RevertToSelf")
 
 type Config struct {
 	Retire    bool   `json:"retire_enrollment,omitempty"`
@@ -162,24 +165,31 @@ func tokenAllowed(token windows.Token, sid string) bool {
 	return err == nil && level >= 0x2000
 }
 func clientAllowed(handle windows.Handle, sid string) bool {
+	// Resolve every syscall before entering an identification-only context. Lazy
+	// DLL loading itself can need filesystem access that context cannot perform.
+	for _, proc := range []*windows.LazyProc{impersonate, openThreadToken, revertToSelf} {
+		if proc.Find() != nil {
+			return false
+		}
+	}
 	runtime.LockOSThread()
-	// If restoring the process identity fails, never release an impersonated thread.
 	defer runtime.UnlockOSThread()
 	ok, _, _ := impersonate.Call(uintptr(handle))
 	if ok == 0 {
 		return false
 	}
 	var token windows.Token
-	err := windows.OpenThreadToken(windows.CurrentThread(), windows.TOKEN_QUERY, true, &token)
-	allowed := false
-	if err == nil {
-		allowed = tokenAllowed(token, sid)
-		token.Close()
-	}
-	if windows.RevertToSelf() != nil {
+	opened, _, _ := openThreadToken.Call(uintptr(windows.CurrentThread()), windows.TOKEN_QUERY, 1, uintptr(unsafe.Pointer(&token)))
+	restored, _, _ := revertToSelf.Call()
+	if restored == 0 {
 		os.Exit(1)
 	}
-	return allowed
+	if opened == 0 {
+		return false
+	}
+	defer token.Close()
+	// Query the captured client token only after restoring the service account.
+	return tokenAllowed(token, sid)
 }
 
 type connKey struct{}

@@ -8,8 +8,11 @@ import (
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 func TestPipeDescriptorDoesNotGrantServerCreation(t *testing.T) {
@@ -94,5 +97,61 @@ func TestNamedPipeClientContextAndWrongSID(t *testing.T) {
 func TestDisabledServiceRefusesBeforeEnrollment(t *testing.T) {
 	if serve(context.Background(), Config{Version: 1}) == nil {
 		t.Fatal("disabled service accepted")
+	}
+}
+
+func TestInstalledFilesRequirePrivateACLAndSingleLink(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "installed")
+	descriptor, err := windows.SecurityDescriptorFromString("O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: descriptor}
+	dirName, _ := windows.UTF16PtrFromString(dir)
+	if err := windows.CreateDirectory(dirName, &sa); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := installedFile(dir, true)
+	if err != nil {
+		t.Fatal("private directory refused", err)
+	}
+	parent.Close()
+	path := filepath.Join(dir, "config.json")
+	name, _ := windows.UTF16PtrFromString(path)
+	h, err := windows.CreateFile(name, windows.GENERIC_WRITE, 0, &sa, windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	windows.CloseHandle(h)
+	f, err := installedFile(path, false)
+	if err != nil {
+		t.Fatal("private file refused", err)
+	}
+	f.Close()
+	link := filepath.Join(dir, "second.json")
+	if err := os.Link(path, link); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := installedFile(path, false); err == nil {
+		f.Close()
+		t.Fatal("hardlinked config accepted")
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	openSD, err := windows.SecurityDescriptorFromString("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;WD)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dacl, _, err := openSD.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := installedFile(path, false); err == nil {
+		f.Close()
+		t.Fatal("public config accepted")
 	}
 }
