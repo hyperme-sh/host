@@ -9,7 +9,7 @@ $script = Join-Path $fixture 'run.ps1'
 @'
 param([string]$Fixture)
 $env:HYPERMESH_WINDOWS_UNIT_CONTRACT = '1'
-& (Join-Path $Fixture 'machineidentity.test.exe') -test.v *> (Join-Path $Fixture 'output.txt')
+& (Join-Path $Fixture 'machineidentity.test.exe') '-test.v' '-test.timeout=2m' *> (Join-Path $Fixture 'output.txt')
 $code = $LASTEXITCODE
 [IO.File]::WriteAllText((Join-Path $Fixture 'exit.txt'), [string]$code)
 exit $code
