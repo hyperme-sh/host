@@ -150,7 +150,9 @@ func TestLeaseStartUnreachableIngress(t *testing.T) {
 	a, hash, listen, _ := newIngressAgent(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	a.cfg.LeaseReadyWait = 400 * time.Millisecond
+	// Leave room for healthy-model polling under the race detector before
+	// asserting the deliberately unreachable forwarder.
+	a.cfg.LeaseReadyWait = 2 * time.Second
 	// Direct /health answers. The forwarder dials a closed port.
 	direct := a.bridgeDial
 	a.containerHealth = func(string) string { return "http://" + direct("") + "/health" }

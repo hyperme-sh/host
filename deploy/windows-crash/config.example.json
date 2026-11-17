@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "enabled": false,
+  "client_sid": "",
+  "plane": "",
+  "tenant": "",
+  "device": "",
+  "request_id": "",
+  "registration_url": ""
+}
