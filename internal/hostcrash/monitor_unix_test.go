@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -27,6 +28,8 @@ func TestMonitorHelper(t *testing.T) {
 		case "panic":
 			go func() { panic("RAW_SECRET_CANARY") }()
 			select {}
+		case "stall":
+			select {}
 		case "ordinary":
 			os.Exit(2)
 		case "normal":
@@ -45,13 +48,35 @@ func TestMonitorHelper(t *testing.T) {
 	os.Exit(code)
 }
 func TestMonitorRuntimeBoundary(t *testing.T) {
-	for _, mode := range []string{"panic", "ordinary", "normal"} {
+	for _, mode := range []string{"panic", "ordinary", "normal", "stall"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			limit := 10 * time.Second
+			if mode == "stall" {
+				limit = time.Second
+			}
+			started := time.Now()
+			ctx, cancel := context.WithTimeout(context.Background(), limit)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMonitorHelper$")
 			cmd.Env = append(os.Environ(), "HYPERMESH_CRASH_UNIT_MODE="+mode)
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			cmd.WaitDelay = time.Second
+			cmd.Cancel = func() error {
+				err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				if err == syscall.ESRCH {
+					return os.ErrProcessDone
+				}
+				return err
+			}
+			defer func() {
+				if cmd.Process != nil {
+					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				}
+			}()
 			output, err := cmd.CombinedOutput()
+			if mode == "stall" && time.Since(started) > 5*time.Second {
+				t.Fatal("stalled process tree exceeded bounded wait")
+			}
 			if bytes.Contains(output, []byte("RAW_SECRET_CANARY")) {
 				t.Fatal("raw panic leaked")
 			}
