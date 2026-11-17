@@ -39,46 +39,56 @@ func TestNamedPipeClientContextAndWrongSID(t *testing.T) {
 		t.Fatal(err)
 	}
 	sid := user.User.Sid.String()
-	path := fmt.Sprintf(`\\.\pipe\hypermesh-crash-unit-%d`, time.Now().UnixNano())
-	l, err := winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: "D:P(A;;GA;;;" + sid + ")"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	result := make(chan bool, 1)
-	go func() {
-		c, err := l.Accept()
-		if err != nil {
-			result <- false
-			return
-		}
-		defer c.Close()
-		c.SetDeadline(time.Now().Add(5 * time.Second))
-		var raw [1]byte
-		if _, err = io.ReadFull(c, raw[:]); err != nil {
-			result <- false
-			return
-		}
-		h := windows.Handle(c.(interface{ Fd() uintptr }).Fd())
-		result <- clientAllowed(h, sid) && !clientAllowed(h, "S-1-5-21-1-2-3-9999")
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	c, err := winio.DialPipeContext(ctx, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	if _, err = c.Write([]byte{1}); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case ok := <-result:
-		if !ok {
-			t.Fatal("pipe context validation failed")
-		}
-	case <-ctx.Done():
-		t.Fatal("pipe test timeout")
+	for _, tc := range []struct {
+		name    string
+		level   winio.PipeImpLevel
+		allowed bool
+	}{
+		{"identification", winio.PipeImpLevelIdentification, true}, {"anonymous", winio.PipeImpLevelAnonymous, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := fmt.Sprintf(`\\.\pipe\hypermesh-crash-unit-%d`, time.Now().UnixNano())
+			l, err := winio.ListenPipe(path, &winio.PipeConfig{SecurityDescriptor: "D:P(A;;GA;;;" + sid + ")"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer l.Close()
+			result := make(chan bool, 1)
+			go func() {
+				c, err := l.Accept()
+				if err != nil {
+					result <- false
+					return
+				}
+				defer c.Close()
+				c.SetDeadline(time.Now().Add(5 * time.Second))
+				var raw [1]byte
+				if _, err = io.ReadFull(c, raw[:]); err != nil {
+					result <- false
+					return
+				}
+				h := windows.Handle(c.(interface{ Fd() uintptr }).Fd())
+				result <- (clientAllowed(h, sid) == tc.allowed) && !clientAllowed(h, "S-1-5-21-1-2-3-9999")
+			}()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			c, err := winio.DialPipeAccessImpLevel(ctx, path, 0x12019b, tc.level)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			if _, err = c.Write([]byte{1}); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case ok := <-result:
+				if !ok {
+					t.Fatal("pipe context validation failed")
+				}
+			case <-ctx.Done():
+				t.Fatal("pipe test timeout")
+			}
+		})
 	}
 }
 func TestDisabledServiceRefusesBeforeEnrollment(t *testing.T) {
