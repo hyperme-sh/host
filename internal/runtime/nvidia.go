@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/FyberLabs/hypermesh-host/internal/trustedmeter"
+	"log"
 	"os/exec"
 	"strings"
 	"time"
@@ -119,9 +120,10 @@ func (h *Handle) Serving() bool {
 
 // NVIDIA talks to docker with --runtime=nvidia.
 type NVIDIA struct {
-	cpu    bool
-	Docker string
-	Run    func(ctx context.Context, name string, args ...string) ([]byte, error)
+	cpu     bool
+	Capture ContainerCapture
+	Docker  string
+	Run     func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
 // NewNVIDIA uses the docker on PATH.
@@ -268,7 +270,12 @@ func (n *NVIDIA) Start(ctx context.Context, spec Spec) (*Handle, error) {
 	if err := ensureWorkloadNetwork(ctx, n.run); err != nil {
 		return nil, err
 	}
-	out, err := n.run(ctx, args...)
+	var out []byte
+	if n.Capture != nil {
+		out, err = n.Capture.Start(ctx, n.run, args)
+	} else {
+		out, err = n.run(ctx, args...)
+	}
 	if err != nil {
 		n.removeCreated(ctx, name)
 		return nil, wrapDocker("start", out, err)
@@ -317,7 +324,15 @@ func wrapDocker(op string, out []byte, err error) error {
 // free for the next lease_start. An already-gone container is a soft
 // success (do not fail lease_stop when the leftover is already gone).
 func (n *NVIDIA) Stop(ctx context.Context, h *Handle) error {
-	return stopAndRemove(ctx, n.run, h)
+	err := stopAndRemove(ctx, n.run, h)
+	if n.Capture != nil && h != nil {
+		if e := n.Capture.Finish(ctx, h.ContainerID, err == nil); e != nil {
+			// Reporting cleanup cannot retain an already stopped lease handle.
+			// Keep failure details private and teardown's result authoritative.
+			log.Print("hypermesh: native crash cleanup unavailable")
+		}
+	}
+	return err
 }
 
 // stopAndRemove is docker stop then docker rm of the named container.

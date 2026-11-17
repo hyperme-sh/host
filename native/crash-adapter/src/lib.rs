@@ -1,4 +1,10 @@
 //! Native worker attachment. Raw SDK transport is permanently disabled.
+#[cfg(target_os = "linux")]
+pub mod container_peer;
+#[cfg(target_os = "linux")]
+pub mod container_run;
+#[cfg(target_os = "linux")]
+pub mod container_transport;
 use hypermesh_crash_retention as retention;
 use hypermesh_local_storage as storage;
 use serde::{Deserialize, Serialize};
@@ -13,7 +19,12 @@ use std::{
 };
 use uuid::Uuid;
 
-static ACTIVE: Mutex<Option<PathBuf>> = Mutex::new(None);
+enum Active {
+    Direct(PathBuf),
+    #[cfg(target_os = "linux")]
+    Delegated,
+}
+static ACTIVE: Mutex<Option<Active>> = Mutex::new(None);
 fn refused() -> io::Error {
     io::Error::other("Host native capture unavailable")
 }
@@ -110,6 +121,31 @@ fn start(handler: &Path) -> io::Result<()> {
     let mut active = ACTIVE.lock().map_err(|_| refused())?;
     if active.is_some() {
         return Err(refused());
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(mode) = std::env::var_os("HYPERMESH_HOST_CRASH_DELEGATED") {
+        if mode != "1" {
+            return Err(refused());
+        }
+        // Do not obtain a permit in the workload process: Host pins the first
+        // requester as the sole handler. The native guard performs that request.
+        let database = Path::new("/var/lib/hypermesh-crash/database");
+        retention::delegation_linux::Client::open(database)?;
+        if !handler.is_absolute() || fs::canonicalize(handler)? != handler {
+            return Err(refused());
+        }
+        use std::os::unix::fs::MetadataExt;
+        let meta = fs::symlink_metadata(handler)?;
+        if !meta.is_file() || meta.uid() != 0 || meta.mode() & 0o022 != 0 || meta.nlink() != 1 {
+            return Err(refused());
+        }
+        let db = CString::new(database.to_str().ok_or_else(refused)?).map_err(|_| refused())?;
+        let handler = CString::new(handler.to_str().ok_or_else(refused)?).map_err(|_| refused())?;
+        if unsafe { hypermesh_host_sdk_initialize(db.as_ptr(), handler.as_ptr()) } != 0 {
+            return Err(refused());
+        }
+        *active = Some(Active::Delegated);
+        return Ok(());
     }
     let owner = retention::Owner::open()?;
     if owner.authority() != retention::Authority::Host {
@@ -228,7 +264,7 @@ fn start(handler: &Path) -> io::Result<()> {
         cleanup(&run)?;
         return Err(refused());
     }
-    *active = Some(run);
+    *active = Some(Active::Direct(run));
     Ok(())
 }
 /// Called by the linked native constructor; no error includes runtime bytes.
@@ -249,7 +285,9 @@ pub extern "C" fn hypermesh_host_crash_stop() {
         if let Ok(mut active) = ACTIVE.lock() {
             if let Some(run) = active.take() {
                 unsafe { hypermesh_host_sdk_close() };
-                let _ = cleanup(&run);
+                if let Active::Direct(run) = run {
+                    let _ = cleanup(&run);
+                }
             }
         }
     });

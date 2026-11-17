@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -76,7 +77,7 @@ func openPrivate(path string, flags int) (*os.File, error) {
 	if private(filepath.Dir(path), true) != nil {
 		return nil, ErrUnavailable
 	}
-	fd, err := syscall.Open(path, flags|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)
+	fd, err := syscall.Open(path, flags|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0600)
 	if err != nil {
 		return nil, ErrUnavailable
 	}
@@ -93,24 +94,45 @@ func openPrivate(path string, flags int) (*os.File, error) {
 	}
 	return file, nil
 }
-func lock(directory string) (*os.File, error) {
+func lock(ctx context.Context, directory string) (*os.File, error) {
 	file, err := openPrivate(filepath.Join(directory, "health-consent", "crash-capture.lock"), syscall.O_RDWR)
 	if err != nil {
 		return nil, err
 	}
-	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil {
 			return file, nil
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-ctx.Done():
 			file.Close()
 			return nil, ErrUnavailable
+		case <-time.After(10 * time.Millisecond):
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
-func collect(directory, id string) (reports []Report, err error) {
+
+type collectionReader struct {
+	context context.Context
+	file    io.ReaderAt
+}
+
+func (r collectionReader) ReadAt(bytes []byte, offset int64) (int, error) {
+	if err := r.context.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.file.ReadAt(bytes, offset)
+	if cancelled := r.context.Err(); cancelled != nil {
+		return n, cancelled
+	}
+	return n, err
+}
+func collect(directory, id string) ([]Report, error) {
+	return collectContext(context.Background(), directory, id)
+}
+func collectContext(parent context.Context, directory, id string) (reports []Report, err error) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
 	if !regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`).MatchString(id) {
 		return nil, ErrUnavailable
 	}
@@ -143,14 +165,22 @@ func collect(directory, id string) (reports []Report, err error) {
 			return nil, ErrUnavailable
 		}
 	}
-	capture, e := lock(directory)
+	capture, e := lock(ctx, directory)
+	if e != nil && ctx.Err() != nil {
+		// A canceled caller cannot skip cleanup while the stopped handler
+		// releases its lock. Never purge through another live writer's lock.
+		cleanup, stopCleanup := context.WithTimeout(context.Background(), 5*time.Second)
+		capture, e = lock(cleanup, directory)
+		stopCleanup()
+	}
 	if e != nil {
+		// The stop marker remains for the independent OS cleanup service.
 		return nil, ErrUnavailable
 	}
 	defer capture.Close()
 	// Purge before exposing any report, on success or failed parsing.
 	defer func() {
-		if os.RemoveAll(run) != nil {
+		if removeRun(run) != nil {
 			reports = nil
 			err = ErrUnavailable
 		} else {
@@ -169,7 +199,7 @@ func collect(directory, id string) (reports []Report, err error) {
 	var total int64
 	err = filepath.WalkDir(run, func(path string, entry os.DirEntry, walkErr error) error {
 		entries++
-		if walkErr != nil || entries > 4096 {
+		if ctx.Err() != nil || walkErr != nil || entries > 4096 {
 			return ErrUnavailable
 		}
 		relative, e := filepath.Rel(run, path)
@@ -178,6 +208,9 @@ func collect(directory, id string) (reports []Report, err error) {
 		}
 		if entry.IsDir() {
 			return private(path, true)
+		}
+		if !entry.Type().IsRegular() {
+			return ErrUnavailable
 		}
 		file, e := openPrivate(path, syscall.O_RDONLY)
 		if e != nil {
@@ -195,7 +228,7 @@ func collect(directory, id string) (reports []Report, err error) {
 		if len(reports) >= 5 || total > 160*1024*1024 {
 			return ErrUnavailable
 		}
-		report, e := reduce(file, info.Size())
+		report, e := reduce(collectionReader{context: ctx, file: file}, info.Size())
 		if e != nil {
 			return e
 		}
@@ -236,7 +269,7 @@ func Run(ctx context.Context, name string, args []string, statePath string, repo
 	}
 	cmd.Env = append(cmd.Env, "DYLD_INSERT_LIBRARIES="+SDKLibrary(), "HYPERMESH_HOST_CRASH_RUN="+id, "HYPERMESH_HOST_CRASH_STATE="+statePath)
 	output, runErr := cmd.CombinedOutput()
-	reports, cleanupErr := collect(directory, id)
+	reports, cleanupErr := collectContext(ctx, directory, id)
 	if cleanupErr != nil {
 		fmt.Fprintln(os.Stderr, "Host native crash cleanup unavailable")
 	}

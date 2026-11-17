@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -33,8 +34,9 @@ const (
 // HSA_OVERRIDE / HSA_OVERRIDE_GFX_VERSION are never set and the gfx
 // target is never guessed. repo@digest is the cert pin; this slice does not pull GHCR.
 type HIP struct {
-	Docker string
-	Run    func(ctx context.Context, name string, args ...string) ([]byte, error)
+	Capture ContainerCapture
+	Docker  string
+	Run     func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
 // NewHIP uses the docker on PATH.
@@ -65,14 +67,14 @@ func HIPStartArgs(spec Spec, ref string) []string {
 		"--device=" + driDevice,
 		"--group-add=video",
 		"-p", publishSpec(spec.HostPort, spec.BindAddress),
-        "-v", ggufBind(spec.GGUFPath),
+		"-v", ggufBind(spec.GGUFPath),
 	}
 	args = append(args, JailArgs()...)
 	if name := ContainerName(spec.LeaseID); name != "hypermesh-" {
 		args = append(args, "--name", name)
 	}
 	args = append(args, llamaServerDockerOpts(spec)...)
- args = append(args, ref, "-c", llamaServerCommand)
+	args = append(args, ref, "-c", llamaServerCommand)
 	return args
 }
 
@@ -96,12 +98,18 @@ func (h *HIP) Start(ctx context.Context, spec Spec) (*Handle, error) {
 	if h.Run == nil && !HIPDevicesPresent() {
 		return nil, ErrNoROCm
 	}
-	if _, err:=requireServeAlias(spec.CatalogID);err!=nil {return nil,err}
-    if out,err:=h.run(ctx,PullArgs(ref)...);err!=nil {
-        if !strings.Contains(ref, "@") {return nil,wrapDocker("pull",out,err)}
-        if _,inspectErr:=h.run(ctx,"image","inspect","--format","{{.Id}}",ref);inspectErr!=nil {return nil,wrapDocker("pull",out,err)}
-    }
-    name := ContainerName(spec.LeaseID)
+	if _, err := requireServeAlias(spec.CatalogID); err != nil {
+		return nil, err
+	}
+	if out, err := h.run(ctx, PullArgs(ref)...); err != nil {
+		if !strings.Contains(ref, "@") {
+			return nil, wrapDocker("pull", out, err)
+		}
+		if _, inspectErr := h.run(ctx, "image", "inspect", "--format", "{{.Id}}", ref); inspectErr != nil {
+			return nil, wrapDocker("pull", out, err)
+		}
+	}
+	name := ContainerName(spec.LeaseID)
 	args := HIPStartArgs(spec, ref)
 	for _, a := range args {
 		if a == "--gpus" || strings.HasPrefix(a, "--gpus=") {
@@ -117,7 +125,12 @@ func (h *HIP) Start(ctx context.Context, spec Spec) (*Handle, error) {
 	if err := ensureWorkloadNetwork(ctx, h.run); err != nil {
 		return nil, err
 	}
-	out, err := h.run(ctx, args...)
+	var out []byte
+	if h.Capture != nil {
+		out, err = h.Capture.Start(ctx, h.run, args)
+	} else {
+		out, err = h.run(ctx, args...)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("hypermesh runtime: hip-rocm start: %w", err)
 	}
@@ -134,7 +147,15 @@ func (h *HIP) Start(ctx context.Context, spec Spec) (*Handle, error) {
 // Stop sends docker stop then docker rm so hypermesh-<lease_id> is
 // free for the next lease_start. Same leftover-name path as NVIDIA.
 func (h *HIP) Stop(ctx context.Context, handle *Handle) error {
-	return stopAndRemove(ctx, h.run, handle)
+	err := stopAndRemove(ctx, h.run, handle)
+	if h.Capture != nil && handle != nil {
+		if e := h.Capture.Finish(ctx, handle.ContainerID, err == nil); e != nil {
+			// Reporting cleanup cannot retain an already stopped lease handle.
+			// Keep failure details private and teardown's result authoritative.
+			log.Print("hypermesh: native crash cleanup unavailable")
+		}
+	}
+	return err
 }
 
 // DockerRun exposes the docker CLI runner for container status and logs.

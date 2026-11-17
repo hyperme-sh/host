@@ -250,17 +250,90 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: hyperme-sh/visor
-          ref: 2f87c129332b04e342eac078d9d01c9720f378ef
+          ref: f607d48da807e351e01fc16ee3a11c22b36f0683
           path: native-authority-source
           persist-credentials: false
       - name: Build disabled worker adapter and SDK option contracts
         run: bash native/crash-adapter/build.sh "$GITHUB_WORKSPACE/native-authority-source" "$RUNNER_TEMP/host-crash-sdk"
-      - name: Archive qualified native bundle
-        run: tar -czf "$RUNNER_TEMP/host-crash-sdk-macos.tar.gz" -C "$RUNNER_TEMP" host-crash-sdk
-      - name: Retain qualified bundle as an Actions artifact
-        # actions/upload-artifact v7
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+
+  container-cleanup-contract:
+    name: Linux container cleanup transport unit contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          name: host-crash-sdk-macos
-          path: ${{ runner.temp }}/host-crash-sdk-macos.tar.gz
-          retention-days: 7
+          persist-credentials: false
+      - name: Test kernel identity and bounded cleanup transport
+        run: |
+          cargo test --locked --manifest-path native/crash-adapter/Cargo.toml --lib
+          cargo build --locked --manifest-path native/crash-adapter/Cargo.toml --bin host-container-cleanup
+
+  linux-crash-image:
+    name: Linux crash runtime image (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Build runtime-only delivery image and native contracts
+        env:
+          HOST_REV: ${{ github.event.pull_request.head.sha || github.sha }}
+          IMAGE: ghcr.io/hyperme-sh/host/crash-sdk:test-${{ matrix.arch }}
+        run: |
+          docker build --target runtime --build-arg "HOST_REV=$HOST_REV" -f deploy/native-crash/Dockerfile.sdk -t "$IMAGE" .
+          docker build --target contracts --build-arg "HOST_REV=$HOST_REV" -f deploy/native-crash/Dockerfile.sdk -t "${IMAGE/crash-sdk/crash-contract}" .
+          # SDK base is a build-contract substitute, not GPU/model qualification.
+          docker build --build-arg "SDK_IMAGE=$IMAGE" --build-arg "WORKER_IMAGE=$IMAGE" -f deploy/native-crash/Dockerfile.worker -t host-worker-overlay-contract .
+
+  publish-linux-crash-image:
+    name: Publish Linux crash TEST image (${{ matrix.arch }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [go, actionlint, container-cleanup-contract, linux-crash-image]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Rebuild validated main source for publication
+        env:
+          HOST_REV: ${{ github.sha }}
+          IMAGE: ghcr.io/hyperme-sh/host/crash-sdk:test-${{ matrix.arch }}
+        run: |
+          docker build --target runtime --build-arg "HOST_REV=$HOST_REV" -f deploy/native-crash/Dockerfile.sdk -t "$IMAGE" .
+          docker build --target contracts --build-arg "HOST_REV=$HOST_REV" -f deploy/native-crash/Dockerfile.sdk -t "${IMAGE/crash-sdk/crash-contract}" .
+          # SDK base is a build-contract substitute, not GPU/model qualification.
+          docker build --build-arg "SDK_IMAGE=$IMAGE" --build-arg "WORKER_IMAGE=$IMAGE" -f deploy/native-crash/Dockerfile.worker -t host-worker-overlay-contract .
+      - name: Publish moving TEST runtime channel
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          IMAGE: ghcr.io/hyperme-sh/host/crash-sdk:test-${{ matrix.arch }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          docker push "$IMAGE"
+          docker push "${IMAGE/crash-sdk/crash-contract}"
+          docker logout ghcr.io

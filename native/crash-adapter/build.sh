@@ -4,9 +4,12 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 source=${1:?Usage: build.sh VISOR_SOURCE OUTPUT}
 output=${2:?Usage: build.sh VISOR_SOURCE OUTPUT}
 expected=$(python3 - "$repo/native/crash-adapter/Cargo.toml" <<'PY'
-import sys,tomllib
-with open(sys.argv[1],'rb') as stream:
-    print(tomllib.load(stream)['dependencies']['hypermesh-crash-retention']['rev'])
+import re,sys
+from pathlib import Path
+matches = re.findall(r'^hypermesh-crash-retention = .*rev = "([a-f0-9]{40})"', Path(sys.argv[1]).read_text(), re.M)
+if len(matches) != 1:
+    raise SystemExit('Expected one exact native authority source revision')
+print(matches[0])
 PY
 )
 [[ $(git -C "$source" rev-parse HEAD) == "$expected" ]] || { echo 'Native authority source mismatch' >&2; exit 1; }
@@ -29,3 +32,7 @@ cp "$source/native/crash/service/hypermesh-host-crash-retention.service" "$outpu
 cp "$source/native/crash/service/sh.hyperme.host.crash-retention.plist" "$output/service/"
 git -C "$repo" rev-parse HEAD > "$output/host-source-revision"
 # Source revisions identify this downloadable artifact, not a running service pin.
+
+if [[ $(uname -s) == Linux ]]; then
+  install -m 0755 "$work/rust/release/host-container-cleanup" "$output/bin/host-container-cleanup"
+fi

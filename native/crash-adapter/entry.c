@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 extern int sentry_host_capture_policy_version(void);
 extern void hypermesh_host_crash_start(const char *handler);
 extern void hypermesh_host_crash_stop(void);
@@ -30,6 +31,9 @@ int hypermesh_host_sdk_initialize(const char *database,const char *handler) {
 void hypermesh_host_sdk_close(void) { sentry_close(); }
 #ifndef HOST_OPTIONS_UNIT
 __attribute__((constructor)) static void host_capture_enter(void) {
+    /* A child handler inherits the preload but must never initialize another SDK. */
+    if (getenv("HYPERMESH_HOST_CRASH_ADAPTER_ACTIVE")) return;
+    if (setenv("HYPERMESH_HOST_CRASH_ADAPTER_ACTIVE", "1", 1) != 0) return;
     Dl_info info;
     if (!dladdr((void *)&host_capture_enter,&info) || !info.dli_fname) return;
     char path[PATH_MAX];
