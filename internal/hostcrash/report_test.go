@@ -32,7 +32,7 @@ func TestEventFixedSchema(t *testing.T) {
 	}
 }
 func TestDestinationRefusesUnsafeConfig(t *testing.T) {
-	for _, dsn := range []string{"http://key@host/1", "https://key:secret@host/1", "https://key@host/01", "https://key@host/1?secret=1", "https://key@host/%31", "https://key@other/1", "https://key@host/prefix/1"} {
+	for _, dsn := range []string{"http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@host/1", "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:secret@host/1", "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@host/01", "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@host/1?secret=1", "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@host/%31", "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@other/1", "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@host/prefix/1"} {
 		if _, err := ParseDestination(dsn, "https://host/api/crash/register"); err == nil {
 			t.Fatal(dsn)
 		}

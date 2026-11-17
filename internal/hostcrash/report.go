@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/FyberLabs/hypermesh-host/internal/buildinfo"
 	"io"
 	"net/http"
 	"net/url"
@@ -38,11 +39,19 @@ func NewEvent(tenant string, captured time.Time) (Event, error) {
 		return Event{}, ErrUnavailable
 	}
 	event := Event{ID: hex.EncodeToString(id[:]), Captured: captured.UTC().Format(time.RFC3339Nano)}
+	release := buildinfo.CurrentVersion()
+	if !regexp.MustCompile(`^[0-9][0-9A-Za-z.+-]{0,63}$`).MatchString(release) {
+		release = "development"
+	}
+	tags := map[string]string{"tenant_id": tenant}
+	if channel := buildinfo.CurrentChannel(); channel == "test" || channel == "prod" {
+		tags["channel"] = channel
+	}
 	body, err := json.Marshal(map[string]any{
 		"event_id": event.ID, "timestamp": event.Captured, "platform": "go", "level": "fatal",
-		"release": "hypermesh-host", "message": "Host Go runtime terminated unexpectedly",
+		"release": "hypermesh-host@" + release, "message": "Host Go runtime terminated unexpectedly",
 		"exception": map[string]any{"values": []map[string]string{{"type": "go_runtime_crash"}}},
-		"tags":      map[string]string{"tenant_id": tenant},
+		"tags":      tags,
 	})
 	if err != nil {
 		return Event{}, ErrUnavailable

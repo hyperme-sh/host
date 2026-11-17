@@ -4,6 +4,7 @@ package hostcrash
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -46,7 +47,9 @@ func TestMonitorHelper(t *testing.T) {
 func TestMonitorRuntimeBoundary(t *testing.T) {
 	for _, mode := range []string{"panic", "ordinary", "normal"} {
 		t.Run(mode, func(t *testing.T) {
-			cmd := exec.Command(os.Args[0], "-test.run=^TestMonitorHelper$")
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMonitorHelper$")
 			cmd.Env = append(os.Environ(), "HYPERMESH_CRASH_UNIT_MODE="+mode)
 			output, err := cmd.CombinedOutput()
 			if bytes.Contains(output, []byte("RAW_SECRET_CANARY")) {
