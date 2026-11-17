@@ -1,4 +1,8 @@
 //! Native worker attachment. Raw SDK transport is permanently disabled.
+#[cfg(target_os = "linux")]
+pub mod container_peer;
+#[cfg(target_os = "linux")]
+pub mod container_transport;
 use hypermesh_crash_retention as retention;
 use hypermesh_local_storage as storage;
 use serde::{Deserialize, Serialize};

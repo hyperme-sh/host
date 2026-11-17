@@ -245,7 +245,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: hyperme-sh/visor
-          ref: 2f87c129332b04e342eac078d9d01c9720f378ef
+          ref: 8ee6c74fc23d5d895a89db594b25356bbd4506fd
           path: native-authority-source
           persist-credentials: false
       - name: Build disabled worker adapter and SDK option contracts
@@ -259,3 +259,14 @@ jobs:
           name: host-crash-sdk-macos
           path: ${{ runner.temp }}/host-crash-sdk-macos.tar.gz
           retention-days: 7
+
+  container-cleanup-contract:
+    name: Linux container cleanup transport unit contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Test kernel identity and bounded cleanup transport
+        run: cargo test --locked --manifest-path native/crash-adapter/Cargo.toml --lib
