@@ -59,3 +59,12 @@ func TestNonSystemCannotUseMachineStore(t *testing.T) {
 		t.Fatal("non-System accessed signing store")
 	}
 }
+
+func TestNonSystemCannotClaimSystemNamespace(t *testing.T) {
+	if RequireSystem() == nil {
+		t.Skip("non-System caller contract")
+	}
+	if h, err := systemNamespace(); err == nil || h != 0 {
+		t.Fatal("unprivileged caller claimed System namespace")
+	}
+}

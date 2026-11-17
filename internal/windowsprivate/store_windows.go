@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -22,6 +23,9 @@ const mutexSD = "O:SYG:SYD:P(A;;0x1f0001;;;SY)"
 var advapi = windows.NewLazySystemDLL("advapi32.dll")
 var createKey = advapi.NewProc("RegCreateKeyExW")
 var flushKey = advapi.NewProc("RegFlushKey")
+var namespaceOnce sync.Once
+var namespaceHandle uintptr
+var namespaceError error
 var ErrPrivate = errors.New("private Windows machine store refused")
 
 func RequireSystem() error {
@@ -74,12 +78,16 @@ func WithStore(ctx context.Context, action func(registry.Key) error) error {
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	namespaceOnce.Do(func() { namespaceHandle, namespaceError = systemNamespace() })
+	if namespaceError != nil || namespaceHandle == 0 {
+		return ErrPrivate
+	}
 	sd, err := windows.SecurityDescriptorFromString(mutexSD)
 	if err != nil {
 		return ErrPrivate
 	}
 	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
-	name, _ := windows.UTF16PtrFromString(`Global\HypermeshCrashServiceStoreV1`)
+	name, _ := windows.UTF16PtrFromString(`HypermeshCrashServicePrivateV1\Store`)
 	h, err := windows.CreateMutex(&sa, false, name)
 	runtime.KeepAlive(sd)
 	if err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
@@ -156,4 +164,51 @@ func Write(k registry.Key, name string, raw []byte) error {
 		return fmt.Errorf("private machine checkpoint flush failed")
 	}
 	return nil
+}
+
+// Keep one namespace handle for the process lifetime. The System SID boundary
+// prevents another account from creating this namespace first; its DACL also
+// prevents opening it from outside that boundary. An alias alone is not trust.
+func systemNamespace() (uintptr, error) {
+	kernel := windows.NewLazySystemDLL("kernel32.dll")
+	createBoundary := kernel.NewProc("CreateBoundaryDescriptorW")
+	addSID := kernel.NewProc("AddSIDToBoundaryDescriptor")
+	deleteBoundary := kernel.NewProc("DeleteBoundaryDescriptor")
+	createNamespace := kernel.NewProc("CreatePrivateNamespaceW")
+	openNamespace := kernel.NewProc("OpenPrivateNamespaceW")
+	for _, proc := range []*windows.LazyProc{createBoundary, addSID, deleteBoundary, createNamespace, openNamespace} {
+		if proc.Find() != nil {
+			return 0, ErrPrivate
+		}
+	}
+	name, _ := windows.UTF16PtrFromString("HypermeshCrashServiceSystemBoundaryV1")
+	boundary, _, _ := createBoundary.Call(uintptr(unsafe.Pointer(name)), 0)
+	if boundary == 0 {
+		return 0, ErrPrivate
+	}
+	defer func() { deleteBoundary.Call(boundary) }()
+	sid, err := windows.StringToSid("S-1-5-18")
+	if err != nil {
+		return 0, ErrPrivate
+	}
+	ok, _, _ := addSID.Call(uintptr(unsafe.Pointer(&boundary)), uintptr(unsafe.Pointer(sid)))
+	runtime.KeepAlive(sid)
+	if ok == 0 {
+		return 0, ErrPrivate
+	}
+	sd, err := windows.SecurityDescriptorFromString("O:SYG:SYD:P(A;;GA;;;SY)")
+	if err != nil {
+		return 0, ErrPrivate
+	}
+	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
+	alias, _ := windows.UTF16PtrFromString("HypermeshCrashServicePrivateV1")
+	h, _, callErr := createNamespace.Call(uintptr(unsafe.Pointer(&sa)), boundary, uintptr(unsafe.Pointer(alias)))
+	runtime.KeepAlive(sd)
+	if h == 0 && errors.Is(callErr, windows.ERROR_ALREADY_EXISTS) {
+		h, _, _ = openNamespace.Call(boundary, uintptr(unsafe.Pointer(alias)))
+	}
+	if h == 0 {
+		return 0, ErrPrivate
+	}
+	return h, nil
 }

@@ -15,6 +15,8 @@ $code = $LASTEXITCODE
 exit $code
 '@ | Set-Content -LiteralPath $script
 $name = 'HypermeshCrashUnit-' + [guid]::NewGuid().ToString('N')
+# Occupy the former public name to prove it cannot block the private lock.
+$oldLock = New-Object Threading.Mutex($false, 'Global\HypermeshCrashServiceStoreV1')
 try {
   $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -Fixture `"$fixture`""
   $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
@@ -28,5 +30,6 @@ try {
 } finally {
   Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+  $oldLock.Dispose()
   Remove-Item -LiteralPath $fixture -Recurse -Force
 }

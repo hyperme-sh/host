@@ -29,7 +29,8 @@ configuration; the same installed identity renews without it. A failed or lost
 bind response can retry with the same checkpoint and enrollment secret.
 
 Signing state is DPAPI-protected as LocalSystem in a protected LocalSystem-only
-HKLM registry key. A private cross-process mutex serializes writes and rotation;
+HKLM registry key. A cross-process mutex in a LocalSystem-bound private namespace serializes writes
+and rotation;
 registry writes are flushed before use. To retire an enrollment, an administrator
 sets `enabled: false` and `retire_enrollment: true` in the protected configuration
 and explicitly starts the service for that operation. It archives the current
