@@ -49,7 +49,7 @@ impl Run {
         let id = Uuid::new_v4();
         let run = root.join(id.to_string());
         storage::create_dir(&run)?;
-        let controls = directory.join("container-controls");
+        let controls = directory.join("controls");
         storage::create_dir(&controls)?;
         let control = controls.join(id.to_string());
         storage::create_dir(&control)?;
@@ -76,6 +76,7 @@ impl Run {
         file.sync_all()?;
         storage::sync_dir(&value.run)?;
         retention::host::validate(&value.run)?;
+        retention::raw_mount_linux::create(&value.run)?;
         retention::permit(&value.run)?;
         Ok(value)
     }
@@ -121,7 +122,11 @@ impl Drop for Run {
         self.server.take();
         let _ = retention::request_stop(&self.run);
         if !self.handoff {
-            let _ = fs::remove_dir_all(&self.run);
+            if self.run.join("database").exists() {
+                let _ = retention::raw_mount_linux::remove(&self.run);
+            } else {
+                let _ = fs::remove_dir_all(&self.run);
+            }
         }
         let _ = fs::remove_dir_all(&self.control);
         if let Some(parent) = self.run.parent() {

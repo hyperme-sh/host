@@ -79,7 +79,7 @@ dependencies = [
 [[package]]
 name = "hypermesh-crash-retention"
 version = "0.1.0"
-source = "git+https://github.com/hyperme-sh/visor?rev=9a08ee1601f8559535ca03f255cc7719fc7f7447#9a08ee1601f8559535ca03f255cc7719fc7f7447"
+source = "git+https://github.com/hyperme-sh/visor?rev=bfbf5f1d0960aa3386e729bb5419f87f80177f5b#bfbf5f1d0960aa3386e729bb5419f87f80177f5b"
 dependencies = [
  "hypermesh-local-storage",
  "libc",
@@ -105,7 +105,7 @@ dependencies = [
 [[package]]
 name = "hypermesh-local-storage"
 version = "0.1.0"
-source = "git+https://github.com/hyperme-sh/visor?rev=9a08ee1601f8559535ca03f255cc7719fc7f7447#9a08ee1601f8559535ca03f255cc7719fc7f7447"
+source = "git+https://github.com/hyperme-sh/visor?rev=bfbf5f1d0960aa3386e729bb5419f87f80177f5b#bfbf5f1d0960aa3386e729bb5419f87f80177f5b"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",

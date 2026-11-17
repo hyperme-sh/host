@@ -8,6 +8,21 @@ fn run() -> std::io::Result<()> {
         path::PathBuf,
         time::{Duration, Instant},
     };
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.len() == 2 && args[0] == "purge" {
+        let id = uuid::Uuid::parse_str(&args[1]).map_err(|_| io::Error::other("invalid run"))?;
+        if id.is_nil() || id.to_string() != args[1] {
+            return Err(io::Error::other("invalid run"));
+        }
+        return hypermesh_crash_retention::raw_mount_linux::remove(
+            &hypermesh_crash_retention::root()?
+                .join("config/crash-runs")
+                .join(&args[1]),
+        );
+    }
+    if !args.is_empty() {
+        return Err(io::Error::other("invalid operation"));
+    }
     fn refused() -> io::Error {
         io::Error::other("Host container cleanup unavailable")
     }

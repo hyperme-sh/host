@@ -146,7 +146,7 @@ func (m *ContainerManager) prepare() (*containerSession, error) {
 		s.abort()
 		return nil, ErrUnavailable
 	}
-	if !regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$`).MatchString(s.mounts.RunID) || s.mounts.Database != filepath.Join(directory, "crash-runs", s.mounts.RunID, "database") || s.mounts.Control != filepath.Join(directory, "container-controls", s.mounts.RunID) || private(s.mounts.Database, true) != nil || private(s.mounts.Control, true) != nil {
+	if !regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$`).MatchString(s.mounts.RunID) || s.mounts.Database != filepath.Join(directory, "crash-runs", s.mounts.RunID, "database") || s.mounts.Control != filepath.Join(directory, "controls", s.mounts.RunID) || private(s.mounts.Database, true) != nil || private(s.mounts.Control, true) != nil {
 		s.abort()
 		return nil, ErrUnavailable
 	}

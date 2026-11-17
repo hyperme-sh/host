@@ -150,7 +150,7 @@ func collect(directory, id string) (reports []Report, err error) {
 	defer capture.Close()
 	// Purge before exposing any report, on success or failed parsing.
 	defer func() {
-		if os.RemoveAll(run) != nil {
+		if removeRun(run) != nil {
 			reports = nil
 			err = ErrUnavailable
 		} else {

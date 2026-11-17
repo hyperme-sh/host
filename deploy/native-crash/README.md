@@ -24,7 +24,9 @@ The installed Host helper is
 the separately installed OS-managed Host retention service before preparing a
 run. Private enrollment, the account-wide capture lock and ephemeral signing
 key stay on Host. The workload sees only a read-only public control directory
-and its writable raw database. No host PID namespace, host proc mount, Docker
+and its writable raw database on a private 160 MiB/4096-inode tmpfs.
+Preparation refuses if the independent cleanup service cannot see that exact
+mount. One account-wide lock prevents multiplying its allowance. No host PID namespace, host proc mount, Docker
 socket, added capability or privileged container is used.
 
 Host starts the container waiting for its public configuration, inspects its

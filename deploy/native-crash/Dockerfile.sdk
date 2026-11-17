@@ -18,12 +18,13 @@ RUN revision=$(sed -n 's/.*hypermesh-crash-retention.*rev = "\([a-f0-9]*\)".*/\1
     && git -C /visor fetch --depth 1 origin "$revision" \
     && git -C /visor checkout --detach FETCH_HEAD \
     && bash /host/native/crash-adapter/build.sh /visor /sdk
+RUN mkdir -p /runtime-tests && cc -O0 /host/scripts/nightly/crash-fixture.c -o /runtime-tests/crash-fixture
 RUN mkdir -p /runtime/bin /runtime/lib /runtime/licenses \
     && cp -a /sdk/bin/. /runtime/bin/ \
     && cp -a /sdk/lib/*.so* /runtime/lib/ \
     && cp -a /sdk/licenses/. /runtime/licenses/ \
     && cp /host/LICENSE /runtime/licenses/HOST-LICENSE
-FROM ubuntu:22.04
+FROM ubuntu:22.04 AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 libssl3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /runtime/ /usr/local/libexec/hypermesh/crash-sdk/
@@ -32,3 +33,17 @@ LABEL org.opencontainers.image.source="https://github.com/hyperme-sh/host" \
       org.opencontainers.image.revision="${HOST_REV}"
 # Loading this delivery image never installs a cleanup service or starts capture.
 ENTRYPOINT ["/bin/false"]
+
+# Separate nightly-only image: test executables never enter the runtime image.
+FROM golang:1 AS contract-build
+ARG HOST_REV
+RUN test -n "$HOST_REV" && git init /host \
+    && git -C /host remote add origin https://github.com/hyperme-sh/host \
+    && git -C /host fetch --depth 1 origin "$HOST_REV" \
+    && git -C /host checkout --detach FETCH_HEAD \
+    && test "$(git -C /host rev-parse HEAD)" = "$HOST_REV"
+WORKDIR /host
+RUN CGO_ENABLED=0 go test -c -o /host-crash-contract ./internal/nativecrash
+FROM runtime AS contracts
+COPY --from=contract-build /host-crash-contract /opt/host-crash-tests/host-crash-contract
+COPY --from=build /runtime-tests/crash-fixture /opt/host-crash-tests/crash-fixture
