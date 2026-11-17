@@ -235,7 +235,7 @@ func (m *ContainerManager) Start(ctx context.Context, run func(context.Context, 
 	m.sessions[id] = s
 	return out, nil
 }
-func (m *ContainerManager) Finish(_ context.Context, id string, stopped bool) error {
+func (m *ContainerManager) Finish(ctx context.Context, id string, stopped bool) error {
 	m.mu.Lock()
 	s := m.sessions[id]
 	delete(m.sessions, id)
@@ -266,7 +266,7 @@ func (m *ContainerManager) Finish(_ context.Context, id string, stopped bool) er
 	if err != nil {
 		return ErrUnavailable
 	}
-	reports, err := collect(directory, s.mounts.RunID)
+	reports, err := collectContext(ctx, directory, s.mounts.RunID)
 	if err != nil {
 		return err
 	}
