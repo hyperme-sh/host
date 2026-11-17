@@ -8,3 +8,12 @@ FROM ${WORKER_IMAGE}
 COPY --from=sdk /usr/local/libexec/hypermesh/crash-sdk/ /usr/local/libexec/hypermesh/crash-sdk/
 # No DSN, credentials, capture toggle, entrypoint or network settings are added.
 # Host enables the library only after preparing its private cleanup helper.
+# Refuse an incompatible base at build time without changing its packages.
+RUN set -eu; \
+    for binary in /usr/local/libexec/hypermesh/crash-sdk/bin/crashpad_handler \
+                  /usr/local/libexec/hypermesh/crash-sdk/bin/libhypermesh_host_crash.so; do \
+        resolved="$(ldd "$binary")"; \
+        if printf '%s\n' "$resolved" | grep -q 'not found'; then \
+            echo 'Worker base lacks a required crash runtime library' >&2; exit 1; \
+        fi; \
+    done

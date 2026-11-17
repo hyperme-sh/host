@@ -16,7 +16,9 @@ moving `test-amd64` and `test-arm64` channels. No manual tag or release is neede
 NVIDIA or ROCm image through `WORKER_IMAGE`. It preserves the model binary,
 accelerator ABI, entrypoint and configuration. Select the existing moving TEST
 base for that variant; this overlay does not choose or certify a new base.
-Linux glibc 2.35 or newer is required. Other libc/architecture combinations
+Linux glibc 2.35 or newer and the SDK runtime dependencies (libcurl, zlib,
+OpenSSL and libstdc++) are required. The overlay checks dynamic linking and
+refuses an incompatible base instead of replacing its packages. Other libc/architecture combinations
 remain unsupported and must keep native capture off.
 
 The installed Host helper is
