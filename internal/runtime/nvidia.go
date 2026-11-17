@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/FyberLabs/hypermesh-host/internal/trustedmeter"
+	"log"
 	"os/exec"
 	"strings"
 	"time"
@@ -325,8 +326,10 @@ func wrapDocker(op string, out []byte, err error) error {
 func (n *NVIDIA) Stop(ctx context.Context, h *Handle) error {
 	err := stopAndRemove(ctx, n.run, h)
 	if n.Capture != nil && h != nil {
-		if e := n.Capture.Finish(ctx, h.ContainerID, err == nil); err == nil {
-			err = e
+		if e := n.Capture.Finish(ctx, h.ContainerID, err == nil); e != nil {
+			// Reporting cleanup cannot retain an already stopped lease handle.
+			// Keep failure details private and teardown's result authoritative.
+			log.Print("hypermesh: native crash cleanup unavailable")
 		}
 	}
 	return err

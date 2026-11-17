@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -148,8 +149,10 @@ func (h *HIP) Start(ctx context.Context, spec Spec) (*Handle, error) {
 func (h *HIP) Stop(ctx context.Context, handle *Handle) error {
 	err := stopAndRemove(ctx, h.run, handle)
 	if h.Capture != nil && handle != nil {
-		if e := h.Capture.Finish(ctx, handle.ContainerID, err == nil); err == nil {
-			err = e
+		if e := h.Capture.Finish(ctx, handle.ContainerID, err == nil); e != nil {
+			// Reporting cleanup cannot retain an already stopped lease handle.
+			// Keep failure details private and teardown's result authoritative.
+			log.Print("hypermesh: native crash cleanup unavailable")
 		}
 	}
 	return err
