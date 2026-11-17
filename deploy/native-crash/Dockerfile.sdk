@@ -2,7 +2,7 @@
 FROM ubuntu:22.04 AS build
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake ninja-build git ca-certificates curl python3 pkg-config libssl-dev zlib1g-dev \
+    build-essential cmake ninja-build git ca-certificates curl python3 pkg-config libssl-dev zlib1g-dev libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -25,7 +25,7 @@ RUN mkdir -p /runtime/bin /runtime/lib /runtime/licenses \
     && cp -a /sdk/licenses/. /runtime/licenses/ \
     && cp /host/LICENSE /runtime/licenses/HOST-LICENSE
 FROM ubuntu:22.04 AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 libssl3 zlib1g ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 libssl3 zlib1g libcurl4 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /runtime/ /usr/local/libexec/hypermesh/crash-sdk/
 ARG HOST_REV
