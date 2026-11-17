@@ -152,6 +152,13 @@ pub struct ContainerPeer {
 pub struct ConnectionPeer {
     process: Process,
 }
+impl ConnectionPeer {
+    pub fn same_process(&self, other: &Self) -> io::Result<bool> {
+        self.process.live()?;
+        other.process.live()?;
+        same(&self.process.proc, &other.process.proc)
+    }
+}
 impl ContainerPeer {
     pub fn inspect(worker: &str, init_pid: i32) -> io::Result<Self> {
         if unsafe { libc::geteuid() } != 0 || !worker_id(worker) {

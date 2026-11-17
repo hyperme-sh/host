@@ -1,5 +1,5 @@
 //! Host-owned bounded transport. This module does not start listeners itself.
-use crate::container_peer::ContainerPeer;
+use crate::container_peer::{ConnectionPeer, ContainerPeer};
 use hypermesh_crash_retention::delegation::{
     HostSession, PublicConfig, CHALLENGE_TIMEOUT, REQUEST_SIZE, RESPONSE_SIZE,
 };
@@ -51,6 +51,7 @@ pub struct Server {
     session: HostSession,
     peer: ContainerPeer,
     listener: UnixListener,
+    writer: Option<ConnectionPeer>,
 }
 impl Server {
     pub fn bind(run: &Path, worker: &str, init_pid: i32, control: &Path) -> io::Result<Self> {
@@ -79,6 +80,7 @@ impl Server {
             session,
             peer,
             listener,
+            writer: None,
         })
     }
     pub fn public_config(&self) -> PublicConfig {
@@ -100,8 +102,13 @@ impl Server {
             }
         };
         let start = Instant::now();
-        let result = (|| {
+        let result: io::Result<bool> = (|| {
             let peer = self.peer.accept(&stream)?;
+            if let Some(writer) = &self.writer {
+                if !writer.same_process(&peer)? {
+                    return Err(refused());
+                }
+            }
             let bytes = request(&mut stream, start)?;
             let worker = self.peer.recheck(&peer)?;
             let response: [u8; RESPONSE_SIZE] = self.session.respond(&bytes, worker)?;
@@ -110,6 +117,9 @@ impl Server {
             stream.write_all(&response)?;
             stream.shutdown(Shutdown::Write)?;
             remaining(start)?;
+            if self.writer.is_none() {
+                self.writer = Some(peer);
+            }
             Ok(true)
         })();
         if result.is_err() {
