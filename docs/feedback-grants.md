@@ -1,6 +1,6 @@
 # Local human-feedback grants
 
-The existing Unix Visor capability bridge has an optional `feedback_grants`
+The existing Linux Visor capability bridge has an optional `feedback_grants`
 boolean, default false, in its protected configuration. When enabled, only the
 configured non-root `client_uid` may POST `/feedback-grant` with
 `{"version":1,"human_reports_opt_in":true}`. Root's separate review interface
@@ -24,3 +24,24 @@ seconds; they cannot review/export/administer intake.
 No configuration is enabled here. Visor caller/UI composition, report transport,
 OIDC phone support and Windows feedback transport remain separate. This route
 performs no report submission, file collection, persistence or credential logging.
+
+## macOS feedback-only broker
+
+The existing `hypermesh-host visor bridge --config <path>` command also supports
+an explicitly configured feedback-only mode on macOS (and Linux). Both
+`feedback_only` and `feedback_grants` must be true. Its configuration contains
+only schema 1, a nonzero `client_uid`, an absolute `socket` path, an absolute
+`identity` path, the HTTPS Plane `base`, and canonical `tenant` and `device` IDs.
+Capability, Conductor, crash and controller settings are rejected in this mode.
+
+Run the broker as root with root-owned configuration and a pre-existing root-owned
+socket directory whose ancestors cannot be changed by other users. Paths must be
+canonical without symlink components; on macOS use `/private/var/...` rather than
+the `/var` alias. The existing socket is never replaced. The configured Visor UID
+is authenticated with macOS `LOCAL_PEERCRED` (Linux uses `SO_PEERCRED`), before HTTP
+handling. Only that non-root UID may POST `/feedback-grant`; root and unrelated
+routes are refused. No capability runner, reviewer or signer is installed.
+
+This change supplies no launch service or enabled configuration. The macOS general
+capability/controller bridge remains unavailable. Windows still needs its own
+feedback-only authenticated pipe transport; the crash-only service is unchanged.

@@ -7,9 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/FyberLabs/hypermesh-host/internal/machineidentity"
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -136,4 +138,26 @@ func validFeedbackGrant(g feedbackGrant, tenant, device, id string, now time.Tim
 	return err == nil && issuer.Scheme == "https" && issuer.Host != "" && issuer.User == nil && issuer.RawQuery == "" && issuer.Fragment == "" &&
 		h.Algorithm == "EdDSA" && h.Type == "JWT" && c.Audience == "hypermesh-feedback-v1" && c.Use == "native-feedback-v1" && feedbackID(c.Subject) &&
 		c.Tenant == tenant && c.Device == device && c.ID == id && c.Issued <= now.Unix() && c.Issued > now.Unix()-60 && c.Expires == c.Issued+60 && c.Expires > now.Unix()
+}
+
+// newFeedbackBridge never installs a command runner, signer or capability reviewer.
+func newFeedbackBridge(config Config) (*Bridge, error) {
+	if config.Schema != 1 || config.ClientUID == 0 || !config.FeedbackGrants ||
+		!feedbackID(config.Tenant) || !feedbackID(config.Device) ||
+		!filepath.IsAbs(config.Identity) || filepath.Clean(config.Identity) != config.Identity ||
+		!filepath.IsAbs(config.Socket) || filepath.Clean(config.Socket) != config.Socket ||
+		config.Conductor != "" || config.AuthorityURL != "" || config.DispatchConfig != "" ||
+		config.CrashRegistrationURL != "" || config.WireGuardKey != "" || len(config.Enabled) != 0 ||
+		config.MachinePrompt != nil || config.PermissionPreview != nil {
+		return nil, refused
+	}
+	if _, err := feedbackOrigin(config.Base); err != nil {
+		return nil, refused
+	}
+	provider := machineidentity.Provider{Path: config.Identity}
+	b := &Bridge{config: config, now: time.Now, busy: make(chan struct{}, 8)}
+	b.credential = func(ctx context.Context) (string, error) {
+		return provider.ExistingToken(ctx, config.Base, config.Tenant, config.Device, "")
+	}
+	return b, nil
 }
