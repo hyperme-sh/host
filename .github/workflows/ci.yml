@@ -161,6 +161,7 @@ jobs:
           go test -race ./internal/hardware ./internal/runtime
           go test -race ./internal/installer -run '^Test(Mac|Native)'
           go test -race ./internal/machineidentity ./internal/hostregistration
+          go test -race ./internal/visorbridge
 
   trusted-meter-engine:
     name: trusted meter CPU build and counter contract

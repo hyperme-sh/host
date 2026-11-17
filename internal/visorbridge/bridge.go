@@ -37,6 +37,7 @@ type Call struct {
 }
 
 type Config struct {
+	FeedbackOnly         bool            `json:"feedback_only,omitempty"`
 	FeedbackGrants       bool            `json:"feedback_grants,omitempty"`
 	CrashRegistrationURL string          `json:"crash_registration_url,omitempty"`
 	Schema               int             `json:"schema"`
@@ -78,6 +79,9 @@ type Bridge struct {
 }
 
 func New(config Config) (*Bridge, error) {
+	if config.FeedbackOnly {
+		return newFeedbackBridge(config)
+	}
 	target, err := url.Parse(config.AuthorityURL)
 	if err != nil || config.Schema != 1 || config.ClientUID == 0 || len(config.Enabled) > 64 || target.Scheme != "https" || target.Host == "" || target.User != nil || target.RawQuery != "" || target.Fragment != "" || target.Path != "/api/v1/aiuditor/capabilities/review" {
 		return nil, refused
@@ -242,6 +246,14 @@ func (b *Bridge) Handler() http.Handler {
 		uid, ok := r.Context().Value(peerKey{}).(uint32)
 		if !ok || (uid != b.config.ClientUID && uid != 0) {
 			http.Error(w, "host capability bridge refused", 403)
+			return
+		}
+		if b.config.FeedbackOnly {
+			if uid != b.config.ClientUID || uid == 0 || r.Method != "POST" || r.URL.Path != "/feedback-grant" {
+				http.NotFound(w, r)
+				return
+			}
+			b.feedback(w, r)
 			return
 		}
 		// Only the trusted root Conductor child may obtain a machine review. The
