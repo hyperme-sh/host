@@ -237,7 +237,7 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		},
 		runtime:      runtime.NewNVIDIA(),
 		hip:          runtime.NewHIP(),
-		metal:        runtime.NewMetal(),
+		metal:        nativeMetal(cfg),
 		tunnels:      wg,
 		keyDir:       keyDirFor(cfg),
 		ingressIface: ingressIface,
@@ -1403,7 +1403,7 @@ func (a *Agent) starterFor(path runtime.Path) runtime.Starter {
 		if a.metal != nil {
 			return a.metal
 		}
-		return runtime.NewMetal()
+		return nativeMetal(a.cfg)
 	default:
 		return a.runtime
 	}

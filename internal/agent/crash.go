@@ -15,6 +15,18 @@ import (
 // that records acceptance of the current Host terms. No extra consent UI applies
 // to Host analytics. Visor's independent consent policy is unchanged.
 func CrashReporter(cfg Config) (func(time.Time), error) {
+	send, err := crashSender(cfg)
+	if err != nil || send == nil {
+		return nil, err
+	}
+	return func(captured time.Time) {
+		event, e := hostcrash.NewEvent(cfg.TenantID, captured)
+		if e == nil {
+			send(event)
+		}
+	}, nil
+}
+func crashSender(cfg Config) (func(hostcrash.Event), error) {
 	if os.Getenv("HYPERMESH_HOST_CRASH_ENABLED") != "1" {
 		return nil, nil
 	}
@@ -32,14 +44,10 @@ func CrashReporter(cfg Config) (func(time.Time), error) {
 	}
 	broker := os.Getenv("HYPERMESH_HOST_CRASH_REGISTRATION_URL")
 	provider := machineidentity.Provider{Path: machineIdentityPath(cfg)}
-	return func(captured time.Time) {
+	return func(event hostcrash.Event) {
 		// A changed or retired enrollment cannot send the old process's report.
 		current, e := a.loadState()
 		if e != nil || current.DeviceID != original.DeviceID || current.DeviceSecret != original.DeviceSecret || !EnrollmentTermsCurrent(cfg.StateDir) {
-			return
-		}
-		event, e := hostcrash.NewEvent(cfg.TenantID, captured)
-		if e != nil {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

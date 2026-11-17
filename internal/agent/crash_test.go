@@ -13,3 +13,12 @@ func TestCrashReportingDisabledAndUnaccepted(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeCrashDoesNotAttachWithoutCurrentTerms(t *testing.T) {
+	t.Setenv("HYPERMESH_HOST_NATIVE_CRASH_ENABLED", "1")
+	t.Setenv("HYPERMESH_HOST_CRASH_ENABLED", "1")
+	metal := nativeMetal(Config{StateDir: t.TempDir()})
+	if metal.Run != nil {
+		t.Fatal("native adapter attached before accepted enrollment")
+	}
+}

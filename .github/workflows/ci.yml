@@ -232,3 +232,30 @@ jobs:
         run: go test -race ./internal/windowsprivate ./internal/windowscrash
       - name: Test LocalSystem signing checkpoint contract
         run: ./scripts/windows/test-system-contract.ps1
+
+  native-worker-crash:
+    name: macOS native worker crash unit and build contracts
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Checkout exact shared native authority source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: hyperme-sh/visor
+          ref: 2f87c129332b04e342eac078d9d01c9720f378ef
+          path: native-authority-source
+          persist-credentials: false
+      - name: Build disabled worker adapter and SDK option contracts
+        run: bash native/crash-adapter/build.sh "$GITHUB_WORKSPACE/native-authority-source" "$RUNNER_TEMP/host-crash-sdk"
+      - name: Archive qualified native bundle
+        run: tar -czf "$RUNNER_TEMP/host-crash-sdk-macos.tar.gz" -C "$RUNNER_TEMP" host-crash-sdk
+      - name: Retain qualified bundle as an Actions artifact
+        # actions/upload-artifact v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: host-crash-sdk-macos
+          path: ${{ runner.temp }}/host-crash-sdk-macos.tar.gz
+          retention-days: 7
