@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -135,5 +136,42 @@ func TestFeedbackGrantResponseBindings(t *testing.T) {
 		if _, err := feedbackOrigin(base); err == nil {
 			t.Fatal("invalid origin accepted")
 		}
+	}
+}
+
+func TestStandaloneFeedbackHandlerHasNoOtherAuthority(t *testing.T) {
+	calls := 0
+	credential := func(context.Context) (string, error) { calls++; return "", fmt.Errorf("fixture stop") }
+	handler, err := NewFeedbackHandler("https://plane.test", feedbackTenant, feedbackDevice, credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ method, path, body string }{
+		{"GET", "/feedback-grant", `{}`}, {"POST", "/feedback-grant?override=1", `{}`},
+		{"POST", "/feedback-grant?", `{}`}, {"POST", "/crash-register", `{}`},
+		{"POST", "/dispatch", `{}`}, {"POST", "/review", `{}`},
+		{"POST", "/feedback-grant", `{"version":1,"human_reports_opt_in":false}`},
+		{"POST", "/feedback-grant", `{"version":1,"human_reports_opt_in":true,"tenant":"override"}`},
+		{"POST", "/feedback-grant", strings.Repeat("x", 257)},
+	} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))
+		if w.Code == 200 || calls != 0 {
+			t.Fatal("refused request reached credential", tc.path)
+		}
+		if w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatal("missing privacy header")
+		}
+	}
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, httptest.NewRequest("POST", "/feedback-grant", strings.NewReader(`{"version":1,"human_reports_opt_in":true}`)))
+	if calls != 1 || w.Code != 503 || strings.Contains(w.Body.String(), "fixture") {
+		t.Fatal("wrong grant-only dispatch")
+	}
+	if _, err := NewFeedbackHandler("http://plane.test", feedbackTenant, feedbackDevice, credential); err == nil {
+		t.Fatal("insecure origin")
+	}
+	if _, err := NewFeedbackHandler("https://plane.test", feedbackTenant, feedbackDevice, nil); err == nil {
+		t.Fatal("missing credential")
 	}
 }

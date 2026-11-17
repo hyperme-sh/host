@@ -161,3 +161,21 @@ func newFeedbackBridge(config Config) (*Bridge, error) {
 	}
 	return b, nil
 }
+
+// NewFeedbackHandler is for an authenticated local transport. The caller must
+// validate its OS peer before invoking this handler. It exposes no other route.
+func NewFeedbackHandler(base, tenant, device string, credential func(context.Context) (string, error)) (http.Handler, error) {
+	if _, err := feedbackOrigin(base); err != nil || !feedbackID(tenant) || !feedbackID(device) || credential == nil {
+		return nil, refused
+	}
+	b := &Bridge{config: Config{FeedbackGrants: true, Base: base, Tenant: tenant, Device: device}, credential: credential, now: time.Now, busy: make(chan struct{}, 8)}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != "POST" || r.URL.Path != "/feedback-grant" || r.URL.RawQuery != "" || r.URL.ForceQuery {
+			http.Error(w, "Unavailable", http.StatusNotFound)
+			return
+		}
+		b.feedback(w, r)
+	}), nil
+}
