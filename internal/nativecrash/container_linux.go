@@ -153,6 +153,21 @@ func (m *ContainerManager) prepare() (*containerSession, error) {
 	return s, nil
 }
 
+// Consume Docker's record before the helper publishes its control directory.
+// Return a valid ID even if removal fails so failure cleanup can still target it.
+func consumeContainerID(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(string(data))
+	removeErr := os.Remove(path)
+	if !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(id) {
+		return "", ErrUnavailable
+	}
+	return id, removeErr
+}
+
 // Start may use the original no-capture path only before a container is started.
 // After Docker starts anything, failure stops/removes that exact container and
 // never repeats model execution.
@@ -171,8 +186,7 @@ func (m *ContainerManager) Start(ctx context.Context, run func(context.Context, 
 	cidfile := filepath.Join(s.mounts.Control, "docker.cid")
 	launch = append([]string{launch[0], "--cidfile", cidfile}, launch[1:]...)
 	out, launchErr := run(ctx, launch...)
-	cid, readErr := os.ReadFile(cidfile)
-	id := strings.TrimSpace(string(cid))
+	id, readErr := consumeContainerID(cidfile)
 	validID := regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(id)
 	fail := func() ([]byte, error) {
 		s.abort()

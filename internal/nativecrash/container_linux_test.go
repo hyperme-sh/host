@@ -4,6 +4,8 @@ package nativecrash
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -51,5 +53,31 @@ func TestUnavailablePreparationFallsBackBeforeDockerOnly(t *testing.T) {
 	}
 	if err := manager.Finish(context.Background(), "unknown", true); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestContainerIDConsumedBeforePublicControlBinding(t *testing.T) {
+	control := t.TempDir()
+	path := filepath.Join(control, "docker.cid")
+	want := strings.Repeat("a", 64)
+	for _, value := range []string{want + "\n", "invalid"} {
+		if err := os.WriteFile(path, []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+		id, err := consumeContainerID(path)
+		if value == "invalid" {
+			if err == nil || id != "" {
+				t.Fatal("invalid identity accepted")
+			}
+		} else if err != nil || id != want {
+			t.Fatal("created identity lost")
+		}
+		entries, err := os.ReadDir(control)
+		if err != nil || len(entries) != 0 {
+			t.Fatal("control directory occupied before helper binding")
+		}
+	}
+	if _, err := consumeContainerID(path); err == nil {
+		t.Fatal("missing identity accepted")
 	}
 }
