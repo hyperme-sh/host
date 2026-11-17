@@ -231,6 +231,8 @@ jobs:
         run: go build -o "$env:RUNNER_TEMP/hypermesh-crash-service.exe" ./cmd/hypermesh-crash-service
       - name: Test storage and pipe contracts
         run: go test -race ./internal/windowsprivate ./internal/windowscrash
+      - name: Unsupported Go crash monitor capability contract
+        run: go test -race ./internal/hostcrash
       - name: Test LocalSystem signing checkpoint contract
         run: ./scripts/windows/test-system-contract.ps1
 
