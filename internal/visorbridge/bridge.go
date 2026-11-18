@@ -37,23 +37,24 @@ type Call struct {
 }
 
 type Config struct {
-	FeedbackOnly         bool            `json:"feedback_only,omitempty"`
-	FeedbackGrants       bool            `json:"feedback_grants,omitempty"`
-	CrashRegistrationURL string          `json:"crash_registration_url,omitempty"`
-	Schema               int             `json:"schema"`
-	ClientUID            uint32          `json:"client_uid"`
-	Socket               string          `json:"socket"`
-	Conductor            string          `json:"conductor"`
-	AuthorityURL         string          `json:"authority_url"`
-	DispatchConfig       string          `json:"dispatch_config"`
-	Base                 string          `json:"base"`
-	Tenant               string          `json:"tenant"`
-	Device               string          `json:"device"`
-	Identity             string          `json:"identity"`
-	WireGuardKey         string          `json:"wireguard_key,omitempty"`
-	Enabled              []Binding       `json:"enabled"`
-	MachinePrompt        *PromptConfig   `json:"machine_prompt,omitempty"`
-	PermissionPreview    *PreviewBinding `json:"permission_preview,omitempty"`
+	ServiceControl       *UserServiceConfig `json:"service_control,omitempty"`
+	FeedbackOnly         bool               `json:"feedback_only,omitempty"`
+	FeedbackGrants       bool               `json:"feedback_grants,omitempty"`
+	CrashRegistrationURL string             `json:"crash_registration_url,omitempty"`
+	Schema               int                `json:"schema"`
+	ClientUID            uint32             `json:"client_uid"`
+	Socket               string             `json:"socket"`
+	Conductor            string             `json:"conductor"`
+	AuthorityURL         string             `json:"authority_url"`
+	DispatchConfig       string             `json:"dispatch_config"`
+	Base                 string             `json:"base"`
+	Tenant               string             `json:"tenant"`
+	Device               string             `json:"device"`
+	Identity             string             `json:"identity"`
+	WireGuardKey         string             `json:"wireguard_key,omitempty"`
+	Enabled              []Binding          `json:"enabled"`
+	MachinePrompt        *PromptConfig      `json:"machine_prompt,omitempty"`
+	PermissionPreview    *PreviewBinding    `json:"permission_preview,omitempty"`
 }
 
 type Result struct {
@@ -119,13 +120,19 @@ func New(config Config) (*Bridge, error) {
 			}
 			args = []string{action, "--socket", config.MachinePrompt.Socket}
 		}
-		if action == "permission-preview" || action == "permission-read-review" {
+		if action == "permission-preview" || action == "permission-read-review" || (action == "permission-action-review" || action == "permission-action-admit") {
 			endpoint, _ := url.Parse(config.AuthorityURL)
 			endpoint.Path = "/api/v1/aiuditor/access/preview"
 			if action == "permission-read-review" {
 				endpoint.Path = "/api/v1/aiuditor/access/read-review"
 			}
+			if action == "permission-action-review" || action == "permission-action-admit" {
+				endpoint.Path = "/api/v1/aiuditor/access/action-review"
+			}
 			args = []string{action, "--plane", config.Base, "--authority", endpoint.String()}
+			if action == "permission-action-admit" {
+				args = append(args, "--config", config.DispatchConfig)
+			}
 		}
 		if action == "capability-review" {
 			args = []string{action, "--endpoint", config.AuthorityURL}
@@ -294,6 +301,15 @@ func (b *Bridge) Handler() http.Handler {
 			b.crashRegister(w, r)
 			return
 		}
+		if r.URL.Path == "/permission-service-context" && r.Method == "GET" {
+			value, err := b.serviceContext()
+			if err != nil {
+				http.Error(w, "Service control unavailable", 503)
+				return
+			}
+			json.NewEncoder(w).Encode(value)
+			return
+		}
 		if r.URL.Path == "/permission-context" && r.Method == "GET" {
 			if b.config.PermissionPreview == nil || !b.config.PermissionPreview.valid() {
 				http.Error(w, "Permission preview unavailable", 503)
@@ -306,7 +322,7 @@ func (b *Bridge) Handler() http.Handler {
 			b.machine(w, r)
 			return
 		}
-		if r.URL.Path == "/permission-read-review" && r.Method == "POST" {
+		if (r.URL.Path == "/permission-read-review" || r.URL.Path == "/permission-action-review" || r.URL.Path == "/permission-action-admit" || r.URL.Path == "/permission-service-execute") && r.Method == "POST" {
 			b.accessReview(w, r, true)
 			return
 		}
