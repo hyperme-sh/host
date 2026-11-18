@@ -27,12 +27,13 @@ func (p PreviewBinding) valid() bool {
 }
 
 type previewRequest struct {
-	RequestID       string          `json:"request_id,omitempty"`
-	ExpectedPolicy  string          `json:"expected_policy_revision,omitempty"`
-	Project         string          `json:"project"`
-	TemplateVersion int             `json:"template_version"`
-	Template        json.RawMessage `json:"template"`
-	Action          json.RawMessage `json:"action"`
+	RequireAdmission bool            `json:"require_dispatch_admission,omitempty"`
+	RequestID        string          `json:"request_id,omitempty"`
+	ExpectedPolicy   string          `json:"expected_policy_revision,omitempty"`
+	Project          string          `json:"project"`
+	TemplateVersion  int             `json:"template_version"`
+	Template         json.RawMessage `json:"template"`
+	Action           json.RawMessage `json:"action"`
 }
 
 func (b *Bridge) preview(w http.ResponseWriter, r *http.Request) {
