@@ -71,6 +71,15 @@ type EnrollResponse struct {
 	DeviceSecret     string `json:"device_secret"`
 }
 
+// ManagedEnrollRequest sends a verifier. The usable credential stays on Host.
+type ManagedEnrollRequest struct {
+	HostName           string `json:"host_name"`
+	WGPublicKey        string `json:"wg_public_key"`
+	EnrollToken        string `json:"enroll_token"`
+	DeviceSecretSHA256 string `json:"device_secret_sha256"`
+	CredentialPrefix   string `json:"credential_prefix"`
+}
+
 // HeartbeatRequest is POST /agent/heartbeat.
 // Health is additive. Older planes ignore it (pydantic extra='ignore').
 // Existing fields stay. A missing Health is the pre-health body.

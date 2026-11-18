@@ -2115,3 +2115,17 @@ GPU capacity, and real model/context execution checks retain their own limits.
 The allowance is a startup/installation gate, not a workload memory budget or
 permission to sell. Build126 retains the older strict policy; this change needs
 a separately authorized signed release before live hosts use it.
+## Managed fleet enrollment
+
+A Plane owner can predeclare a device and mint a token for its fixed host alias.
+Set `HYPERMESH_MANAGED_DEVICE_ID`, `HYPERMESH_HOST_NAME` (the lowercase alias),
+an explicit HTTPS `HYPERMESH_CONTROL_PLANE_URL`, and `HYPERMESH_TENANT_ID`.
+Give the process its own `HYPERMESH_STATE_DIR` and a private
+`HYPERMESH_AGENT_ENV_FILE`. Its local signing and WireGuard keys stay in that
+state directory. The `enroll` command can resume the same request following
+response loss. The agent retains its existing identity on service restart.
+
+Define a distinct `HYPERMESH_WG_IFACE` before running the agent. Use a matching
+userspace WireGuard service where required. The Plane and Gateway must assign
+this interface an overlay that is disjoint from other interfaces on the
+machine. Restore the private state directory as part of a Host rebuild.
