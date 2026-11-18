@@ -119,9 +119,12 @@ func New(config Config) (*Bridge, error) {
 			}
 			args = []string{action, "--socket", config.MachinePrompt.Socket}
 		}
-		if action == "permission-preview" {
+		if action == "permission-preview" || action == "permission-read-review" {
 			endpoint, _ := url.Parse(config.AuthorityURL)
 			endpoint.Path = "/api/v1/aiuditor/access/preview"
+			if action == "permission-read-review" {
+				endpoint.Path = "/api/v1/aiuditor/access/read-review"
+			}
 			args = []string{action, "--plane", config.Base, "--authority", endpoint.String()}
 		}
 		if action == "capability-review" {
@@ -301,6 +304,10 @@ func (b *Bridge) Handler() http.Handler {
 		}
 		if (r.URL.Path == "/machine-context" && r.Method == "GET") || (r.URL.Path == "/machine-prompt" && r.Method == "POST") {
 			b.machine(w, r)
+			return
+		}
+		if r.URL.Path == "/permission-read-review" && r.Method == "POST" {
+			b.accessReview(w, r, true)
 			return
 		}
 		if r.URL.Path == "/permission-preview" && r.Method == "POST" {
