@@ -85,6 +85,12 @@ func (b *Bridge) accessReview(w http.ResponseWriter, r *http.Request, active boo
 	if active {
 		nonce = body.RequestID
 		action = "permission-read-review"
+		if r.URL.Path == "/permission-action-review" || r.URL.Path == "/permission-action-admit" || r.URL.Path == "/permission-service-execute" {
+			action = "permission-action-review"
+			if r.URL.Path != "/permission-action-review" {
+				action = "permission-action-admit"
+			}
+		}
 	}
 	payload := map[string]any{"version": 1, "request_id": nonce, "tenant_id": b.config.Tenant, "device_id": b.config.Device, "bot_id": binding.Bot, "assignment_id": binding.Assignment, "session_id": binding.Session, "project": body.Project, "template_version": 1, "template": body.Template, "action": body.Action}
 	if active && body.ExpectedPolicy != "" {
@@ -113,6 +119,15 @@ func (b *Bridge) accessReview(w http.ResponseWriter, r *http.Request, active boo
 			fail()
 			return
 		}
+	}
+	if r.URL.Path == "/permission-service-execute" {
+		output, err := b.restartService(ctx, body.Action, result)
+		if err != nil {
+			fail()
+			return
+		}
+		w.Write(output)
+		return
 	}
 	w.Write(result)
 }
