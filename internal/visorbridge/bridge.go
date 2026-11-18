@@ -119,6 +119,11 @@ func New(config Config) (*Bridge, error) {
 				return nil, refused
 			}
 			args = []string{action, "--plane", config.Base, "--socket", config.MachinePrompt.Socket}
+			if len(config.MachinePrompt.Checks) > 0 {
+				endpoint, _ := url.Parse(config.AuthorityURL)
+				endpoint.Path = "/api/v1/aiuditor/access/action-review"
+				args = append(args, "--authority", endpoint.String(), "--config", config.DispatchConfig)
+			}
 		}
 		if action == "machine-prompt" || action == "continue-plan" {
 			if config.MachinePrompt == nil || !config.MachinePrompt.valid() {

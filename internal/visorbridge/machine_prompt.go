@@ -7,11 +7,21 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 )
 
 // PromptConfig is root-managed routing for one currently assigned local project.
+type CodingCheck struct {
+	Name       string   `json:"name"`
+	Executable string   `json:"executable"`
+	SHA256     string   `json:"sha256"`
+	Args       []string `json:"args"`
+}
 type PromptConfig struct {
+	Checks []CodingCheck `json:"checks,omitempty"`
+
 	PreviewBinding
 	Workspace   string `json:"workspace"`
 	Socket      string `json:"socket"`
@@ -21,7 +31,7 @@ type PromptConfig struct {
 }
 
 func (p PromptConfig) valid() bool {
-	return p.PreviewBinding.valid() && filepath.IsAbs(p.Workspace) && filepath.Clean(p.Workspace) == p.Workspace && filepath.IsAbs(p.Socket) && len(p.Class) > 0 && len(p.Class) <= 128 && len(p.Destination) > 0 && len(p.Destination) <= 256 && p.MaxOutput > 0 && p.MaxOutput <= 32768
+	return validCodingChecks(p.Checks) && p.PreviewBinding.valid() && filepath.IsAbs(p.Workspace) && filepath.Clean(p.Workspace) == p.Workspace && filepath.IsAbs(p.Socket) && len(p.Class) > 0 && len(p.Class) <= 128 && len(p.Destination) > 0 && len(p.Destination) <= 256 && p.MaxOutput > 0 && p.MaxOutput <= 32768
 }
 func (b *Bridge) machineBinding() map[string]any {
 	p := b.config.MachinePrompt
@@ -59,7 +69,7 @@ func (b *Bridge) machineContext(ctx context.Context) (map[string]any, error) {
 	if !ok || expires <= now || expires > now+11 || fact["organization_id"] != p.Organization {
 		return nil, refused
 	}
-	return map[string]any{"identity": fact, "plane": b.config.Base, "workspace": p.Workspace, "class": p.Class, "destination": p.Destination, "max_output_tokens": p.MaxOutput}, nil
+	return map[string]any{"identity": fact, "plane": b.config.Base, "workspace": p.Workspace, "class": p.Class, "destination": p.Destination, "max_output_tokens": p.MaxOutput, "checks": codingCheckNames(p.Checks)}, nil
 }
 func (b *Bridge) machine(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -134,4 +144,35 @@ func (b *Bridge) machine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write(result)
+}
+
+func codingCheckNames(checks []CodingCheck) []string {
+	names := []string{}
+	for _, check := range checks {
+		names = append(names, check.Name)
+	}
+	return names
+}
+
+func validCodingChecks(checks []CodingCheck) bool {
+	encoded, _ := json.Marshal(checks)
+	if len(encoded) > 8192 {
+		return false
+	}
+	if len(checks) > 32 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, c := range checks {
+		if seen[c.Name] || !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`).MatchString(c.Name) || !strings.HasPrefix(c.Executable, "/usr/") || filepath.Clean(c.Executable) != c.Executable || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(c.SHA256) || len(c.Args) > 32 {
+			return false
+		}
+		seen[c.Name] = true
+		for _, arg := range c.Args {
+			if len(arg) > 4096 || strings.ContainsRune(arg, 0) {
+				return false
+			}
+		}
+	}
+	return true
 }

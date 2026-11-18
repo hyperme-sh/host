@@ -44,3 +44,17 @@ func TestCodingBridgeUsesOnlyConfiguredTarget(t *testing.T) {
 		t.Fatal("caller-controlled target or peer accepted")
 	}
 }
+
+func TestCodingCheckConfiguration(t *testing.T) {
+	check := CodingCheck{Name: "unit", Executable: "/usr/bin/python3.11", SHA256: strings.Repeat("a", 64), Args: []string{"-m", "unittest"}}
+	if !validCodingChecks([]CodingCheck{check}) {
+		t.Fatal("valid check refused")
+	}
+	if validCodingChecks([]CodingCheck{check, check}) {
+		t.Fatal("duplicate check")
+	}
+	check.Executable = "/project/run"
+	if validCodingChecks([]CodingCheck{check}) {
+		t.Fatal("workspace executable accepted")
+	}
+}
