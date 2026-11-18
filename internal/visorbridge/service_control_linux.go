@@ -59,6 +59,11 @@ func (b *Bridge) serviceContext() (map[string]any, error) {
 	return map[string]any{"uid": c.UID, "units": c.Units, "executable": c.Executable, "executable_sha256": hash, "controller_binding_sha256": binding}, nil
 }
 func (b *Bridge) restartService(ctx context.Context, action, result []byte) ([]byte, error) {
+	return b.restartServiceWith(ctx, action, result, b.serviceExecutable, func(cmd *exec.Cmd) error { return cmd.Run() })
+}
+
+// Dependencies are explicit so contract checks use a named disposable executor.
+func (b *Bridge) restartServiceWith(ctx context.Context, action, result []byte, open func() (*os.File, string, error), run func(*exec.Cmd) error) ([]byte, error) {
 	var review struct {
 		Reserved  bool            `json:"reserved"`
 		Permitted bool            `json:"permitted"`
@@ -68,7 +73,7 @@ func (b *Bridge) restartService(ctx context.Context, action, result []byte) ([]b
 	if json.Unmarshal(result, &review) != nil || !review.Reserved || !review.Permitted || review.Expires <= float64(time.Now().UnixNano())/1e9 {
 		return nil, refused
 	}
-	file, hash, err := b.serviceExecutable()
+	file, hash, err := open()
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +103,7 @@ func (b *Bridge) restartService(ctx context.Context, action, result []byte) ([]b
 	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	cmd := serviceCommand(ctx, b.config.ServiceControl, args.Unit, file)
-	if ctx.Err() != nil || cmd.Run() != nil {
+	if ctx.Err() != nil || run(cmd) != nil {
 		return nil, refused
 	}
 	return json.Marshal(map[string]any{"completed": true, "unit": args.Unit, "review": json.RawMessage(result)})

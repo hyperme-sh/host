@@ -4,7 +4,13 @@ package visorbridge
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -37,5 +43,48 @@ func TestServiceDeadlineUsesShorterLimit(t *testing.T) {
 	}
 	if got := serviceDeadline(101, 2, now); !got.Equal(time.Unix(101, 0)) {
 		t.Fatal(got)
+	}
+}
+
+func TestNamedServiceExecutorRequiresCurrentBoundAdmission(t *testing.T) {
+	b := &Bridge{config: Config{ClientUID: 1001, ServiceControl: &UserServiceConfig{Executable: "/usr/bin/systemctl", UID: 1001, GID: 1001, Units: []string{"worker.service"}}}}
+	binding, _ := b.serviceBinding()
+	hash := strings.Repeat("a", 64)
+	args, _ := json.Marshal(serviceArguments{Verb: "restart", Unit: "worker.service", UID: 1001, Executable: "/usr/bin/systemctl", ExecutableHash: hash, BindingHash: binding})
+	sum := sha256.Sum256(args)
+	action, _ := json.Marshal(map[string]any{"operation": "service_restart", "target": "worker.service", "arguments_json": string(args), "arguments_sha256": hex.EncodeToString(sum[:]), "limits": map[string]any{"max_bytes": 10, "timeout_seconds": 2}})
+	review := map[string]any{"reserved": true, "permitted": true, "expires_at": float64(time.Now().UnixNano())/1e9 + 9, "action": json.RawMessage(action)}
+	calls := 0
+	open := func() (*os.File, string, error) { f, err := os.Open(os.DevNull); return f, hash, err }
+	namedExecutor := func(cmd *exec.Cmd) error {
+		calls++
+		if cmd.Args[len(cmd.Args)-1] != "worker.service" || cmd.SysProcAttr.Credential.Uid != 1001 {
+			t.Fatal(cmd.Args)
+		}
+		return nil
+	}
+	raw, _ := json.Marshal(review)
+	output, err := b.restartServiceWith(context.Background(), action, raw, open, namedExecutor)
+	if err != nil || calls != 1 {
+		t.Fatal(err, calls)
+	}
+	var result map[string]any
+	json.Unmarshal(output, &result)
+	if result["completed"] != true {
+		t.Fatal(result)
+	}
+	review["reserved"] = false
+	raw, _ = json.Marshal(review)
+	if _, err = b.restartServiceWith(context.Background(), action, raw, open, namedExecutor); err == nil || calls != 1 {
+		t.Fatal("unreserved execution")
+	}
+	review["reserved"] = true
+	raw, _ = json.Marshal(review)
+	changed := func() (*os.File, string, error) {
+		f, err := os.Open(os.DevNull)
+		return f, strings.Repeat("b", 64), err
+	}
+	if _, err = b.restartServiceWith(context.Background(), action, raw, changed, namedExecutor); err == nil || calls != 1 {
+		t.Fatal("changed executable executed")
 	}
 }
