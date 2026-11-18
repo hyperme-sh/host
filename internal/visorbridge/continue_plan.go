@@ -41,7 +41,7 @@ func (b *Bridge) continuePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw, _ = json.Marshal(map[string]any{"credential": credential, "input": map[string]any{"binding": b.machineBinding(), "destination": p.Destination, "max_output_tokens": p.MaxOutput, "plan": in.Plan}})
-	result, e := b.command(ctx, "continue-plan", raw, 524288)
+	result, e := b.command(ctx, "continue-plan", raw, 1048576)
 	if e != nil || !json.Valid(result) {
 		fail()
 		return
