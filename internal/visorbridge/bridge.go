@@ -120,9 +120,12 @@ func New(config Config) (*Bridge, error) {
 			}
 			args = []string{action, "--socket", config.MachinePrompt.Socket}
 		}
-		if action == "permission-preview" || (action == "permission-read-review" || action == "permission-read-admit") || (action == "permission-action-review" || action == "permission-action-admit") {
+		if action == "permission-dream" || action == "permission-preview" || (action == "permission-read-review" || action == "permission-read-admit") || (action == "permission-action-review" || action == "permission-action-admit") {
 			endpoint, _ := url.Parse(config.AuthorityURL)
 			endpoint.Path = "/api/v1/aiuditor/access/preview"
+			if action == "permission-dream" {
+				endpoint.Path = "/api/v1/aiuditor/access/dream"
+			}
 			if action == "permission-read-review" || action == "permission-read-admit" {
 				endpoint.Path = "/api/v1/aiuditor/access/read-review"
 			}
@@ -320,6 +323,10 @@ func (b *Bridge) Handler() http.Handler {
 		}
 		if (r.URL.Path == "/machine-context" && r.Method == "GET") || (r.URL.Path == "/machine-prompt" && r.Method == "POST") {
 			b.machine(w, r)
+			return
+		}
+		if r.URL.Path == "/permission-dream" && r.Method == "POST" {
+			b.permissionDream(w, r)
 			return
 		}
 		if ((r.URL.Path == "/permission-read-review" || r.URL.Path == "/permission-read-admit") || r.URL.Path == "/permission-action-review" || r.URL.Path == "/permission-action-admit" || r.URL.Path == "/permission-service-execute") && r.Method == "POST" {
