@@ -65,12 +65,13 @@ func (b *Bridge) restartService(ctx context.Context, action, result []byte) ([]b
 // Dependencies are explicit so contract checks use a named disposable executor.
 func (b *Bridge) restartServiceWith(ctx context.Context, action, result []byte, open func() (*os.File, string, error), run func(*exec.Cmd) error) ([]byte, error) {
 	var review struct {
-		Reserved  bool            `json:"reserved"`
-		Permitted bool            `json:"permitted"`
-		Expires   float64         `json:"expires_at"`
-		Action    json.RawMessage `json:"action"`
+		DispatchAdmitted bool            `json:"dispatch_admitted"`
+		Reserved         bool            `json:"reserved"`
+		Permitted        bool            `json:"permitted"`
+		Expires          float64         `json:"expires_at"`
+		Action           json.RawMessage `json:"action"`
 	}
-	if json.Unmarshal(result, &review) != nil || !review.Reserved || !review.Permitted || review.Expires <= float64(time.Now().UnixNano())/1e9 {
+	if json.Unmarshal(result, &review) != nil || !review.Reserved || !review.DispatchAdmitted || !review.Permitted || review.Expires <= float64(time.Now().UnixNano())/1e9 {
 		return nil, refused
 	}
 	file, hash, err := open()

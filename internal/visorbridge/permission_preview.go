@@ -27,12 +27,13 @@ func (p PreviewBinding) valid() bool {
 }
 
 type previewRequest struct {
-	RequestID       string          `json:"request_id,omitempty"`
-	ExpectedPolicy  string          `json:"expected_policy_revision,omitempty"`
-	Project         string          `json:"project"`
-	TemplateVersion int             `json:"template_version"`
-	Template        json.RawMessage `json:"template"`
-	Action          json.RawMessage `json:"action"`
+	RequireAdmission bool            `json:"require_dispatch_admission,omitempty"`
+	RequestID        string          `json:"request_id,omitempty"`
+	ExpectedPolicy   string          `json:"expected_policy_revision,omitempty"`
+	Project          string          `json:"project"`
+	TemplateVersion  int             `json:"template_version"`
+	Template         json.RawMessage `json:"template"`
+	Action           json.RawMessage `json:"action"`
 }
 
 func (b *Bridge) preview(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +86,9 @@ func (b *Bridge) accessReview(w http.ResponseWriter, r *http.Request, active boo
 	if active {
 		nonce = body.RequestID
 		action = "permission-read-review"
+		if r.URL.Path == "/permission-read-admit" {
+			action = "permission-read-admit"
+		}
 		if r.URL.Path == "/permission-action-review" || r.URL.Path == "/permission-action-admit" || r.URL.Path == "/permission-service-execute" {
 			action = "permission-action-review"
 			if r.URL.Path != "/permission-action-review" {

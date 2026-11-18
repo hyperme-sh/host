@@ -53,7 +53,7 @@ func TestNamedServiceExecutorRequiresCurrentBoundAdmission(t *testing.T) {
 	args, _ := json.Marshal(serviceArguments{Verb: "restart", Unit: "worker.service", UID: 1001, Executable: "/usr/bin/systemctl", ExecutableHash: hash, BindingHash: binding})
 	sum := sha256.Sum256(args)
 	action, _ := json.Marshal(map[string]any{"operation": "service_restart", "target": "worker.service", "arguments_json": string(args), "arguments_sha256": hex.EncodeToString(sum[:]), "limits": map[string]any{"max_bytes": 10, "timeout_seconds": 2}})
-	review := map[string]any{"reserved": true, "permitted": true, "expires_at": float64(time.Now().UnixNano())/1e9 + 9, "action": json.RawMessage(action)}
+	review := map[string]any{"reserved": true, "dispatch_admitted": true, "permitted": true, "expires_at": float64(time.Now().UnixNano())/1e9 + 9, "action": json.RawMessage(action)}
 	calls := 0
 	open := func() (*os.File, string, error) { f, err := os.Open(os.DevNull); return f, hash, err }
 	namedExecutor := func(cmd *exec.Cmd) error {
@@ -73,6 +73,12 @@ func TestNamedServiceExecutorRequiresCurrentBoundAdmission(t *testing.T) {
 	if result["completed"] != true {
 		t.Fatal(result)
 	}
+	review["dispatch_admitted"] = false
+	raw, _ = json.Marshal(review)
+	if _, err = b.restartServiceWith(context.Background(), action, raw, open, namedExecutor); err == nil || calls != 1 {
+		t.Fatal("legacy reservation executed without owner admission")
+	}
+	review["dispatch_admitted"] = true
 	review["reserved"] = false
 	raw, _ = json.Marshal(review)
 	if _, err = b.restartServiceWith(context.Background(), action, raw, open, namedExecutor); err == nil || calls != 1 {
