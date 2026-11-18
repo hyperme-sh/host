@@ -114,6 +114,12 @@ func New(config Config) (*Bridge, error) {
 		if action == "machine-context" {
 			args = []string{action, "--plane", config.Base}
 		}
+		if action == "coding-run" {
+			if config.MachinePrompt == nil || !config.MachinePrompt.valid() {
+				return nil, refused
+			}
+			args = []string{action, "--plane", config.Base, "--socket", config.MachinePrompt.Socket}
+		}
 		if action == "machine-prompt" {
 			if config.MachinePrompt == nil || !config.MachinePrompt.valid() {
 				return nil, refused
@@ -323,6 +329,10 @@ func (b *Bridge) Handler() http.Handler {
 		}
 		if (r.URL.Path == "/machine-context" && r.Method == "GET") || (r.URL.Path == "/machine-prompt" && r.Method == "POST") {
 			b.machine(w, r)
+			return
+		}
+		if r.URL.Path == "/coding-run" && r.Method == "POST" {
+			b.coding(w, r)
 			return
 		}
 		if r.URL.Path == "/permission-dream" && r.Method == "POST" {
