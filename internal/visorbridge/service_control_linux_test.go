@@ -6,6 +6,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestServiceCommandDropsPrivilegeAndFixesArguments(t *testing.T) {
@@ -26,5 +27,15 @@ func TestServiceCommandDropsPrivilegeAndFixesArguments(t *testing.T) {
 		if _, err := b.restartService(context.Background(), []byte(`{}`), []byte(review)); err == nil {
 			t.Fatal("executed without current admission")
 		}
+	}
+}
+
+func TestServiceDeadlineUsesShorterLimit(t *testing.T) {
+	now := time.Unix(100, 0)
+	if got := serviceDeadline(110, 2, now); !got.Equal(time.Unix(102, 0)) {
+		t.Fatal(got)
+	}
+	if got := serviceDeadline(101, 2, now); !got.Equal(time.Unix(101, 0)) {
+		t.Fatal(got)
 	}
 }

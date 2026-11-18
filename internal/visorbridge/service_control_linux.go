@@ -86,7 +86,15 @@ func (b *Bridge) restartService(ctx context.Context, action, result []byte) ([]b
 	if string(a) != string(r) {
 		return nil, refused
 	}
-	deadline := time.Unix(0, int64(review.Expires*1e9))
+	var scope struct {
+		Limits struct {
+			Seconds uint32 `json:"timeout_seconds"`
+		} `json:"limits"`
+	}
+	if json.Unmarshal(action, &scope) != nil || scope.Limits.Seconds == 0 || scope.Limits.Seconds > 30 {
+		return nil, refused
+	}
+	deadline := serviceDeadline(review.Expires, scope.Limits.Seconds, time.Now())
 	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	cmd := serviceCommand(ctx, b.config.ServiceControl, args.Unit, file)
@@ -106,4 +114,13 @@ func serviceCommand(ctx context.Context, c *UserServiceConfig, unit string, file
 	cmd.Stderr = io.Discard
 	cmd.WaitDelay = time.Second
 	return cmd
+}
+
+func serviceDeadline(expires float64, seconds uint32, now time.Time) time.Time {
+	lease := time.Unix(0, int64(expires*1e9))
+	limit := now.Add(time.Duration(seconds) * time.Second)
+	if limit.Before(lease) {
+		return limit
+	}
+	return lease
 }
