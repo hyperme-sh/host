@@ -124,6 +124,15 @@ func TestNativeVulkanManifestBindsHardwareClassAndDevice(t *testing.T) {
 			if err := m.Validate(); err != nil {
 				t.Fatal(err)
 			}
+			reference := m
+			reference.Purpose, reference.DecodeTokS = NativeReferencePurpose, 0
+			if err := reference.Validate(); err != nil {
+				t.Fatalf("TEST Vulkan reference rejected: %v", err)
+			}
+			reference.ClassID = reference.HardwareClassID
+			if reference.Validate() == nil {
+				t.Fatal("accepted first-reference collection for a production hardware class")
+			}
 			wrong := m
 			wrong.Device = "MTL0"
 			if wrong.Validate() == nil {

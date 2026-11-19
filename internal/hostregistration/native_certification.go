@@ -64,7 +64,7 @@ func (m NativeManifest) Validate() error {
 	vulkan := oneOf(m.HardwareClassID, "amd-ryzen-ai-max-395", "amd-ryzen-ai-max-495") &&
 		(m.ClassID == m.HardwareClassID || m.ClassID == "amd-halo-vulkan-lab") &&
 		m.Protocol == NativeVulkanProtocol && m.OS == "linux" && m.Arch == "amd64" && m.Device == "Vulkan0" &&
-		m.Purpose == nativeCertificatePurpose
+		(m.Purpose == nativeCertificatePurpose || m.ClassID == "amd-halo-vulkan-lab")
 	if (!metal && !vulkan) || !validPurpose || m.Samples != 3 || m.GeneratedTokens != 32 || m.PhysicalAcceptance || m.ThermalC != nil || !oneOf(m.SuiteID, "pack-v1", "thin-v1") || m.CatalogID == "" || !regexp.MustCompile(`^sha256:[a-f0-9]{64}$`).MatchString(m.FileHash) || !hashRE.MatchString(m.RuntimeSHA256) || !hashRE.MatchString(m.Hardware) || !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(m.CollectorCommit) || !regexp.MustCompile(`^sha256:[a-f0-9]{64}$`).MatchString(m.EnvironmentHash) || m.ContextTokens < 512 || m.ContextTokens > 131072 || m.SizeBytes <= 0 || m.SizeBytes > 512<<30 || math.IsNaN(m.DecodeTokS) || math.IsInf(m.DecodeTokS, 0) {
 		return fmt.Errorf("unsupported or incomplete native certificate manifest")
 	}
@@ -115,7 +115,7 @@ func (c *Client) nativeCertification(ctx context.Context, r Request, device, sec
 	haloClass := haloNativeClass(r.HostName)
 	metal := r.ClassID == "darwin-arm64-lab"
 	vulkan := haloClass != "" && (r.ClassID == haloClass || r.ClassID == "amd-halo-vulkan-lab")
-	if r.Validate() != nil || (!metal && !vulkan) || (firstReference && !metal) || !UUID.MatchString(device) || !UUID.MatchString(id) || !onboardingSecretRE.MatchString(secret) {
+	if r.Validate() != nil || (!metal && !vulkan) || (firstReference && !metal && r.ClassID != "amd-halo-vulkan-lab") || !UUID.MatchString(device) || !UUID.MatchString(id) || !onboardingSecretRE.MatchString(secret) {
 		return out, fmt.Errorf("invalid native certification identity")
 	}
 	nonceBytes := make([]byte, 32)

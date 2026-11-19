@@ -148,3 +148,13 @@ to both commands using the original approved agent plan.
 The runtime must be a root-owned executable under root-owned, non-writable
 ancestors. If the upload response is lost, retry the approved plan using its
 saved evidence. The command leaves local services inactive and selling paused.
+
+For a registered, inactive Halo TEST profile with shared capacity configured,
+use `plan-certification --halo-test --first-reference --registration-plan-sha
+DIGEST --plan /root/halo-reference/plan.json` when the native class suite has no
+published reference. Run `certify-agent --halo-test` with the saved plan and
+its returned digest, the pinned local model and Vulkan runtime, a private
+artifact directory, and `--run`. Keep the plan and evidence files for
+submission recovery. The completed run goes to benchmark review. After
+publication, plan an ordinary certification run on each Halo without
+`--first-reference`.
