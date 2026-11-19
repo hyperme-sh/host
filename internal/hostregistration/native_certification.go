@@ -11,6 +11,7 @@ import (
 )
 
 const NativeMetalProtocol = "metal-llama-bench-depth-v1"
+const NativeVulkanProtocol = "vulkan-llama-bench-depth-v1"
 const NativeReferencePurpose = "lab-qualification-v1"
 const nativeCertificatePurpose = "native-certification-v1"
 
@@ -45,7 +46,11 @@ func (m NativeManifest) Validate() error {
 	}
 	validPurpose := m.Purpose == nativeCertificatePurpose && m.DecodeTokS > 0 ||
 		m.Purpose == NativeReferencePurpose && m.DecodeTokS == 0
-	if m.ClassID != "darwin-arm64-lab" || !validPurpose || m.Protocol != NativeMetalProtocol || m.OS != "darwin" || m.Arch != "arm64" || m.Samples != 3 || m.GeneratedTokens != 32 || m.Device != "MTL0" || m.PhysicalAcceptance || m.ThermalC != nil || !oneOf(m.SuiteID, "pack-v1", "thin-v1") || m.CatalogID == "" || !regexp.MustCompile(`^sha256:[a-f0-9]{64}$`).MatchString(m.FileHash) || !hashRE.MatchString(m.RuntimeSHA256) || !hashRE.MatchString(m.Hardware) || !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(m.CollectorCommit) || !regexp.MustCompile(`^sha256:[a-f0-9]{64}$`).MatchString(m.EnvironmentHash) || m.ContextTokens < 512 || m.ContextTokens > 131072 || m.SizeBytes <= 0 || m.SizeBytes > 512<<30 || math.IsNaN(m.DecodeTokS) || math.IsInf(m.DecodeTokS, 0) {
+	validPlatform := m.ClassID == "darwin-arm64-lab" && m.Protocol == NativeMetalProtocol &&
+		m.OS == "darwin" && m.Arch == "arm64" && m.Device == "MTL0" ||
+		oneOf(m.ClassID, "amd-ryzen-ai-max-395", "amd-ryzen-ai-max-495") &&
+			m.Protocol == NativeVulkanProtocol && m.OS == "linux" && m.Arch == "amd64" && m.Device == "Vulkan0"
+	if !validPlatform || !validPurpose || m.Samples != 3 || m.GeneratedTokens != 32 || m.PhysicalAcceptance || m.ThermalC != nil || !oneOf(m.SuiteID, "pack-v1", "thin-v1") || m.CatalogID == "" || !regexp.MustCompile(`^sha256:[a-f0-9]{64}$`).MatchString(m.FileHash) || !hashRE.MatchString(m.RuntimeSHA256) || !hashRE.MatchString(m.Hardware) || !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(m.CollectorCommit) || !regexp.MustCompile(`^sha256:[a-f0-9]{64}$`).MatchString(m.EnvironmentHash) || m.ContextTokens < 512 || m.ContextTokens > 131072 || m.SizeBytes <= 0 || m.SizeBytes > 512<<30 || math.IsNaN(m.DecodeTokS) || math.IsInf(m.DecodeTokS, 0) {
 		return fmt.Errorf("unsupported or incomplete native certificate manifest")
 	}
 	return nil
@@ -120,7 +125,7 @@ func (c *Client) nativeCertification(ctx context.Context, r Request, device, sec
 	if firstReference {
 		purpose = NativeReferencePurpose
 	}
-	if out.Manifest.Purpose != purpose || out.ProtocolVersion != 1 || out.Nonce != nonce || out.RunID != id || out.TenantID != c.tenant || out.DeviceID != device || out.RequestID != r.RequestID || out.Manifest.Validate() != nil || !hashRE.MatchString(out.ManifestSHA256) || out.SellingAllowed == nil || *out.SellingAllowed || !oneOf(out.State, "planned", "passed", "failed") || out.ExpiresAt.IsZero() {
+	if out.Manifest.ClassID != r.ClassID || out.Manifest.Protocol != NativeMetalProtocol || out.Manifest.Purpose != purpose || out.ProtocolVersion != 1 || out.Nonce != nonce || out.RunID != id || out.TenantID != c.tenant || out.DeviceID != device || out.RequestID != r.RequestID || out.Manifest.Validate() != nil || !hashRE.MatchString(out.ManifestSHA256) || out.SellingAllowed == nil || *out.SellingAllowed || !oneOf(out.State, "planned", "passed", "failed") || out.ExpiresAt.IsZero() {
 		return NativeRun{}, fmt.Errorf("native certification response differs from this installation")
 	}
 	if previous == nil && (out.Manifest.EnvironmentHash != environment || out.Manifest.Hardware != hardware || out.State != "planned" || !out.ExpiresAt.After(time.Now()) || out.ExpiresAt.After(time.Now().Add(2*time.Hour))) {

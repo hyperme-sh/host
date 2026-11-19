@@ -286,3 +286,41 @@ func TestNativeRuntimeResolutionRequiresTrustedOwnershipAndModes(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeVulkanDepthProofMatchesStrixClass(t *testing.T) {
+	for _, target := range []struct{ class, gpu string }{
+		{"amd-ryzen-ai-max-395", "AMD Radeon 8060S Graphics (RADV STRIX_HALO)"},
+		{"amd-ryzen-ai-max-495", "AMD Radeon 8065S (RADV STRIX_HALO)"},
+	} {
+		t.Run(target.class, func(t *testing.T) {
+			report, manifest := nativeFixtureReport()
+			manifest.ClassID, manifest.Protocol = target.class, hostregistration.NativeVulkanProtocol
+			manifest.OS, manifest.Arch, manifest.Device = "linux", "amd64", "Vulkan0"
+			report.OS, report.Arch, report.Device, report.Backend = manifest.OS, manifest.Arch, manifest.Device, "vulkan"
+			for i := range report.Samples {
+				var rows []map[string]any
+				if err := json.Unmarshal(report.Samples[i].Raw, &rows); err != nil {
+					t.Fatal(err)
+				}
+				rows[0]["devices"], rows[0]["backends"], rows[0]["gpu_info"] = manifest.Device, "Vulkan", target.gpu
+				raw, err := json.Marshal(rows)
+				if err != nil {
+					t.Fatal(err)
+				}
+				report.Samples[i].Raw = raw
+			}
+			proof, err := nativeEvidence(report, manifest)
+			if err != nil || len(proof.Samples) != 3 || proof.Samples[0].Backend != "vulkan" {
+				t.Fatalf("Vulkan proof failed: %v", err)
+			}
+			if manifest.ClassID == "amd-ryzen-ai-max-395" {
+				manifest.ClassID = "amd-ryzen-ai-max-495"
+			} else {
+				manifest.ClassID = "amd-ryzen-ai-max-395"
+			}
+			if _, err := nativeEvidence(report, manifest); err == nil {
+				t.Fatal("accepted Vulkan samples from the other Strix model")
+			}
+		})
+	}
+}

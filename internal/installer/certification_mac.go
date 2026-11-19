@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -289,33 +288,6 @@ func printNativePlan(out io.Writer, path string, p nativePlan) int {
 		return 1
 	}
 	return 0
-}
-func nativeEvidence(r certmeasure.Report, m hostregistration.NativeManifest) (hostregistration.NativeEvidence, error) {
-	e := hostregistration.NativeEvidence{EnvironmentHash: r.EnvironmentHash, Hardware: r.Hardware, FileHash: "sha256:" + r.ModelSHA256, RuntimeSHA256: r.RuntimeSHA256, CollectorCommit: r.CollectorCommit, OS: r.OS, Arch: r.Arch, StartedAt: r.StartedAt, CompletedAt: r.CompletedAt, CleanupComplete: true, Samples: []hostregistration.NativeSample{}}
-	if m.Validate() != nil || r.Schema != "hypermesh-certification-measurements-v1" || r.MeasurementState != "passed" || r.FailureCode != "" || r.CertificationState != "not_evaluated" || r.PhysicalAcceptance || r.Backend != "metal" || r.Device != m.Device || r.RuntimeImage != "" || r.OS != "darwin" || r.Arch != "arm64" || r.EnvironmentHash != m.EnvironmentHash || r.Hardware != m.Hardware || e.FileHash != m.FileHash || r.RuntimeSHA256 != m.RuntimeSHA256 || r.CollectorCommit != m.CollectorCommit || r.ContextTokens != m.ContextTokens || r.GeneratedTokens != 32 || len(r.Samples) != 3 || !r.CompletedAt.After(r.StartedAt) {
-		return e, fmt.Errorf("native report differs from the approved protocol, pins or inventory")
-	}
-	for _, s := range r.Samples {
-		var rows []struct {
-			Average   float64   `json:"avg_ns"`
-			Samples   []float64 `json:"samples_ns"`
-			Prompt    *int      `json:"n_prompt"`
-			Depth     *int      `json:"n_depth"`
-			Generated *int      `json:"n_gen"`
-			Layers    *int      `json:"n_gpu_layers"`
-			Device    string    `json:"devices"`
-			Backends  string    `json:"backends"`
-		}
-		if json.Unmarshal(s.Raw, &rows) != nil || len(rows) != 1 {
-			return e, fmt.Errorf("native raw context proof missing")
-		}
-		v := rows[0]
-		if v.Prompt == nil || *v.Prompt != 0 || v.Depth == nil || *v.Depth != m.ContextTokens-32 || v.Generated == nil || *v.Generated != 32 || v.Layers == nil || *v.Layers != 99 || v.Device != m.Device || !(strings.Contains(strings.ToLower(v.Backends), "mtl") || strings.Contains(strings.ToLower(v.Backends), "metal")) || v.Average <= 0 || math.IsNaN(v.Average) || math.IsInf(v.Average, 0) || len(v.Samples) != 1 || v.Samples[0] != v.Average || math.Abs(s.TokensPerSecond-32e9/v.Average) > 1e-6 {
-			return e, fmt.Errorf("native raw sample differs from requested Metal depth workload")
-		}
-		e.Samples = append(e.Samples, hostregistration.NativeSample{CapturedAt: s.CapturedAt, ElapsedMS: s.ElapsedMS, AverageNS: v.Average, PromptTokens: 0, DepthTokens: *v.Depth, GeneratedTokens: 32, GPULayers: 99, Device: v.Device, Backend: "metal"})
-	}
-	return e, nil
 }
 
 // Preserve absence separately from a malformed or unsafe existing file.
