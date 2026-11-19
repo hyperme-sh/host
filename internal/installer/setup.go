@@ -183,7 +183,11 @@ func normalizedSetupArch(arch string) string {
 }
 
 func selectSetupProfile(p Plan, platform SetupPlatform, requested string) (*SetupProfile, error) {
-	if !((platform.OS == "ubuntu" && (platform.Version == "22.04" || platform.Version == "24.04")) || (platform.OS=="debian" && (platform.Version=="12"||platform.Version=="13"))) {
+	isHalo := haloSetup(p)
+	ubuntu := platform.OS == "ubuntu" && (platform.Version == "22.04" || platform.Version == "24.04" ||
+		(isHalo && platform.Version == "26.10"))
+	debian := platform.OS == "debian" && (platform.Version == "12" || platform.Version == "13")
+	if !ubuntu && !debian {
 		return nil, fmt.Errorf("no setup policy for this OS; use a supported Ubuntu or Debian profile")
 	}
 	f := p.Hardware.Facts
@@ -193,7 +197,7 @@ func selectSetupProfile(p Plan, platform SetupPlatform, requested string) (*Setu
 	cpuSystem:=hardware.SystemID(f)
  if p.Resources.MemoryMode=="cpu" && p.Resources.Resources.CPU && arch=="arm64" && (cpuSystem=="radxa-rock-5"||cpuSystem=="radxa-orion-o6n"||cpuSystem=="renesas-rz-v2h") {
     id=platform.OS+"-arm64-cpu"
- } else if haloSetup(p) {
+ } else if isHalo {
     id=platform.OS+"-amd-halo-vulkan"
  } else if platform.OS=="debian" {return nil,fmt.Errorf("Debian accelerator setup policies are not qualified")
  } else if p.Resources.Resources.UMA {

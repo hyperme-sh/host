@@ -27,7 +27,7 @@ func TestHaloNativeScope(t *testing.T) {
 			r := Resources{SystemBytes: tc.memory * GiB, AvailableSystemBytes: 40 * GiB, DiskFreeBytes: 64 * GiB,
 				UMA: true, UMARuntime: &UMARuntime{Backend: "vulkan", FreeBytes: 40 * GiB, TotalBytes: 64 * GiB}}
 			fresh := Plan{Hardware: hardware.Recommend(facts), Resources: ResourceReport{MemoryMode: haloMemoryMode, Resources: r, ModelDirectory: haloState + "/models"}}
-			for _, os := range []struct{ id, version string }{{"ubuntu", "24.04"}, {"debian", "13"}} {
+			for _, os := range []struct{ id, version string }{{"ubuntu", "24.04"}, {"ubuntu", "26.10"}, {"debian", "13"}} {
 				profile, err := selectSetupProfile(fresh, SetupPlatform{OS: os.id, Version: os.version}, "auto")
 				if err != nil || profile.ID != os.id+"-amd-halo-vulkan" {
 					t.Fatalf("setup profile = %v, %v", profile, err)
@@ -74,6 +74,9 @@ func TestHaloNativeScope(t *testing.T) {
 			fresh.Resources.Resources.SystemBytes--
 			if haloSetup(fresh) {
 				t.Error("allowed below-minimum OS-visible RAM")
+			}
+			if _, err := selectSetupProfile(fresh, SetupPlatform{OS: "ubuntu", Version: "26.10"}, "auto"); err == nil {
+				t.Error("allowed Ubuntu 26.10 outside the Halo Vulkan profile")
 			}
 		})
 	}
