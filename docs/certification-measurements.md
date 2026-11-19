@@ -116,3 +116,9 @@ Pass the actual agent state directory, including for a separate production
 profile. The script verifies the archive before extracting it and the
 collector verifies the GGUF before launching three independent samples at
 16,384 context tokens (32 generated). Retain each report with its runtime pin.
+
+The Vulkan collector recognizes a single Strix Halo render device and uses
+the lesser of free GPU GTT and available system RAM, with a runtime reserve.
+The fixed firmware VRAM carveout alone is too small for this workload.
+On Ubuntu 26.10 the b12180 Vulkan archive also needs the distro's
+`libssl3t64` compatibility package for the OpenSSL 3 ABI.

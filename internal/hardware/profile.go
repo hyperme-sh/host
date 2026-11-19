@@ -28,6 +28,7 @@ type Facts struct {
     Tegra bool `json:"tegra"`
     CUDA bool `json:"cuda"`
     HIP bool `json:"hip"`
+    StrixHaloGTTFreeBytes int64 `json:"strix_halo_gtt_free_bytes,omitempty"`
     Vulkan bool `json:"vulkan"`
     Metal bool `json:"metal"`
 }
@@ -90,8 +91,8 @@ func Recommend(f Facts) Profile {
         p.Backend = "vulkan"
         p.Libraries = []string{"llama.cpp Vulkan"}
         p.Setup = []string{"Vendor Vulkan driver and SDK", "CMake -DGGML_VULKAN=ON"}
-        // Vulkan presence alone does not establish an allocation budget.
-        memory = 0
+        // Only a measured integrated Strix Halo GTT budget can use shared RAM.
+        memory = min(memory, f.StrixHaloGTTFreeBytes)
     }
     if p.Backend != "cpu" { p.BenchmarkArgs[5] = "99" }
     reserve := memory/4
@@ -156,7 +157,10 @@ func Detect(ctx context.Context) Profile {
     }
     if f.Tegra && output(ctx,"nvcc","--version")!="" { f.CUDA=true;f.GPU="Tegra integrated GPU" }
     if !f.CUDA && hasROCmGPU(output(ctx,"rocminfo")) { f.HIP=true;f.GPU="ROCm GPU";f.AcceleratorFreeBytes=amdMemory() }
-    if !f.CUDA && !f.HIP && output(ctx,"vulkaninfo","--summary")!="" { f.Vulkan=true }
+    if !f.CUDA && !f.HIP {
+        f.StrixHaloGTTFreeBytes = strixHaloGTTFree()
+        f.Vulkan = f.StrixHaloGTTFreeBytes > 0 || output(ctx,"vulkaninfo","--summary")!=""
+    }
     if runtime.GOOS=="darwin" {
         f.Model=output(ctx,"sysctl","-n","hw.model")
         f.Processor=output(ctx,"sysctl","-n","machdep.cpu.brand_string")
@@ -167,6 +171,29 @@ func Detect(ctx context.Context) Profile {
     p := Recommend(f)
     p.MemoryEncryption = inspectMemoryEncryption(runtime.GOOS, runtime.GOARCH, read("/proc/cpuinfo"))
     return p
+}
+
+// strixHaloGTTFree reads the current shared allocation budget for the sole
+// DRM render device. A second device makes the Vulkan device mapping ambiguous.
+func strixHaloGTTFree() int64 {
+    devices, _ := filepath.Glob("/sys/class/drm/renderD*/device")
+    if len(devices) != 1 {
+        return 0
+    }
+    return strixHaloGTTAt(devices[0])
+}
+
+func strixHaloGTTAt(device string) int64 {
+    if read(filepath.Join(device, "vendor")) != "0x1002" ||
+        read(filepath.Join(device, "device")) != "0x1586" {
+        return 0
+    }
+    total, totalErr := strconv.ParseInt(read(filepath.Join(device, "mem_info_gtt_total")), 10, 64)
+    used, usedErr := strconv.ParseInt(read(filepath.Join(device, "mem_info_gtt_used")), 10, 64)
+    if totalErr != nil || usedErr != nil || used < 0 || total <= used {
+        return 0
+    }
+    return total - used
 }
 
 func amdMemory() int64 {
