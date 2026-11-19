@@ -265,3 +265,19 @@ Released under the MIT License. See [LICENSE](LICENSE). Copyright (c) 2026 Fyber
 The model files and container images that hosts run (for example llama.cpp and the models you download) have their own licenses, which are not covered by this one.
 
 Authenticated public certification jobs may provide `certification_context_tokens` (512–131072). The host runs that window in one slot, checks the full context, then records the same timed probe used by native qualification. Invalid windows and private-model configuration overrides fail closed. The assignment does not change host defaults, lease execution or the private-model configuration contract.
+
+#### Continue task checks
+
+The root-managed `machine_prompt.checks` catalog supplies fixed checks to the
+Conductor edit worker. Each entry has a unique `name`, a canonical `/usr/`
+`executable`, its lowercase SHA-256 in `sha256`, and an `args` array. Resolve
+executable symlinks when configuring the catalog. Visor shows only check names;
+a task selects names, never commands. The bridge supplies `client_uid` as the
+file owner, the current machine binding, and the trusted policy endpoint.
+Existing response-only operation is unchanged when the catalog is empty.
+
+The Linux worker requires Bubblewrap at `/usr/bin/bwrap`, reads only selected
+existing text files owned by `client_uid`, and executes short checks against a
+private copy without network or host credentials. Configure the corresponding
+AIuditor `check` rules with the executable hash. Check failures feed bounded
+repair attempts; lost or uncertain actions are never automatically replayed.

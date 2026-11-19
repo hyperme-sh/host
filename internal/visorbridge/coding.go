@@ -48,6 +48,9 @@ func (b *Bridge) coding(w http.ResponseWriter, r *http.Request) {
 	target["class"] = p.Class
 	target["destination"] = p.Destination
 	target["max_output_tokens"] = p.MaxOutput
+	if len(p.Checks) > 0 {
+		target["execution_options"] = map[string]any{"uid": b.config.ClientUID, "checks": p.Checks}
+	}
 	envelope, _ := json.Marshal(map[string]any{"credential": token, "target": target})
 	result, e := b.command(ctx, "coding-run", envelope, 8192)
 	if e != nil {
