@@ -90,3 +90,29 @@ when an existing reference is unverified. It retains that reference and all
 candidate evidence; it does not silently replace a class reference, certify the
 host or activate selling. Normal automated comparison remains available when a
 trusted matching reference exists.
+
+## Repeatable lab setup for Apple silicon and AMD Strix Halo
+
+Use `scripts/run-native-benchmark.sh` with the signed platform collector and
+a reviewed upstream llama.cpp release archive. On Apple silicon it stages the
+complete native archive including dylibs and selects Metal device `MTL0`.
+On Linux x86_64 it selects Vulkan device `Vulkan0` from the supplied Vulkan
+archive. On systems with more than one GPU, use the direct collector command
+and explicitly select the intended device. Neither path installs packages or
+starts services.
+
+Use a private working directory and verify that the host is idle and excluded
+from scheduling throughout the run. Keep the collector, model and evidence
+directory under your control. For comparable results, use the same GGUF and
+llama.cpp revision on all hosts:
+
+```sh
+./scripts/run-native-benchmark.sh \
+  /private/bench/hypermesh-deploy /private/bench/llama-release.tar.gz ARCHIVE_SHA256 \
+  /private/bench/model.gguf MODEL_SHA256 /var/lib/hypermesh /private/bench/evidence
+```
+
+Pass the actual agent state directory, including for a separate production
+profile. The script verifies the archive before extracting it and the
+collector verifies the GGUF before launching three independent samples at
+16,384 context tokens (32 generated). Retain each report with its runtime pin.
