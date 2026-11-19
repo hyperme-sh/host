@@ -3,7 +3,9 @@ package agent
 import (
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -47,6 +49,7 @@ type Config struct {
 	ControlPlaneURL    string
 	TenantID           string
 	EnrollToken        string
+	ManagedDeviceID    string
 	StateDir           string
 	HeartbeatEvery     time.Duration
 	JobEvery           time.Duration
@@ -159,12 +162,22 @@ type Config struct {
 // after this returns.
 func FromEnv() Config {
 	fps, fpErr := update.ParseFingerprints(os.Getenv("HYPERMESH_UPDATE_FINGERPRINTS"))
+	managedID := strings.TrimSpace(os.Getenv("HYPERMESH_MANAGED_DEVICE_ID"))
+	plane := strings.TrimSpace(os.Getenv("HYPERMESH_CONTROL_PLANE_URL"))
+	if plane == "" && managedID == "" {
+		plane = defaultControlPlane
+	}
+	modelPath := os.Getenv("HYPERMESH_GGUF_PATH")
+	if modelPath == "" && managedID == "" {
+		modelPath = DefaultModelPath
+	}
 	return Config{
-		ControlPlaneURL:           envOr("HYPERMESH_CONTROL_PLANE_URL", defaultControlPlane),
+		ControlPlaneURL:           plane,
 		TenantID:                  os.Getenv("HYPERMESH_TENANT_ID"),
 		TrustedMeterBundle:        os.Getenv("HYPERMESH_TRUSTED_METER_BUNDLE"),
 		EnrollToken:               os.Getenv("HYPERMESH_ENROLL_TOKEN"),
 		HostName:                  strings.TrimSpace(os.Getenv("HYPERMESH_HOST_NAME")),
+		ManagedDeviceID:           managedID,
 		Reenroll:                  os.Getenv("HYPERMESH_REENROLL") == "1",
 		StateDir:                  envOr("HYPERMESH_STATE_DIR", defaultStateDir),
 		HeartbeatEvery:            defaultHeartbeat,
@@ -174,7 +187,7 @@ func FromEnv() Config {
 		ListenPort:                envOr("HYPERMESH_LISTEN_PORT", defaultListenPort),
 		LeaseReadyWait:            secondsEnv("HYPERMESH_LEASE_START_READY_TIMEOUT_S", defaultLeaseReadyTimeout),
 		CompletionsURL:            os.Getenv("HYPERMESH_COMPLETIONS_URL"),
-		GGUFPath:                  envOr("HYPERMESH_GGUF_PATH", DefaultModelPath),
+		GGUFPath:                  modelPath,
 		PrivateBlobAccount:        strings.TrimSpace(os.Getenv("HYPERMESH_MODEL_BLOB_ACCOUNT")),
 		DiskFloor:                 strings.TrimSpace(os.Getenv("HYPERMESH_DISK_FLOOR_BYTES")),
 		DiskMargin:                strings.TrimSpace(os.Getenv("HYPERMESH_DISK_MARGIN_BYTES")),
@@ -258,6 +271,21 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.StateDir) == "" {
 		return fmt.Errorf("hypermesh: state dir is required")
+	}
+	if c.ManagedDeviceID != "" {
+		origin, err := url.Parse(c.ControlPlaneURL)
+		if err != nil || origin.Scheme != "https" || origin.Host == "" || origin.User != nil ||
+			origin.RawQuery != "" || origin.Fragment != "" || (origin.Path != "" && origin.Path != "/") {
+			return fmt.Errorf("hypermesh: managed enrollment requires an explicit HTTPS plane origin")
+		}
+		if !uuidRE.MatchString(c.ManagedDeviceID) || c.ManagedDeviceID == "00000000-0000-0000-0000-000000000000" ||
+			!managedAlias.MatchString(c.HostName) || len(c.HostName) > 100 {
+			return fmt.Errorf("hypermesh: managed enrollment requires a device UUID and canonical host alias")
+		}
+		if !filepath.IsAbs(c.StateDir) || filepath.Clean(c.StateDir) == defaultStateDir ||
+			c.Reenroll || c.DeviceSecret != "" || c.ReportedHostType() != "model" {
+			return fmt.Errorf("hypermesh: managed enrollment requires a dedicated state directory and model host")
+		}
 	}
 	if c.HeartbeatEvery <= 0 {
 		return fmt.Errorf("hypermesh: heartbeat interval must be > 0")
@@ -403,9 +431,12 @@ func (c Config) PublishPort() string {
 }
 
 // GGUFHostPath is the host weights file for docker -v ...:/models/model.gguf:ro.
-// Empty means lease_start must refuse. FromEnv does not return empty:
-// an unset HYPERMESH_GGUF_PATH is DefaultModelPath. An explicit value,
-// including a path under a home directory, is returned unchanged.
+// Managed profiles keep their default model and cache under their state directory.
+// Unmanaged profiles use the default supplied by FromEnv.
 func (c Config) GGUFHostPath() string {
-	return strings.TrimSpace(c.GGUFPath)
+	path := strings.TrimSpace(c.GGUFPath)
+	if path == "" && c.ManagedDeviceID != "" {
+		return filepath.Join(c.StateDir, "models", "model.gguf")
+	}
+	return path
 }

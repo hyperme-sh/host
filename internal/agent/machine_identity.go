@@ -21,6 +21,9 @@ func machineAPIClient(cfg Config) *api.Client {
 	c := api.NewClient(cfg.ControlPlaneURL, cfg.TenantID)
 	p := machineidentity.Provider{Path: machineIdentityPath(cfg)}
 	c.Credential = func(ctx context.Context) (string, error) {
+		if cfg.ManagedDeviceID != "" {
+			return p.Token(ctx, cfg.ControlPlaneURL, cfg.TenantID, c.DeviceID, c.DeviceID, c.DeviceSecret)
+		}
 		return p.ExistingToken(ctx, cfg.ControlPlaneURL, cfg.TenantID, c.DeviceID, c.DeviceSecret)
 	}
 	c.InvalidateCredential = p.Invalidate

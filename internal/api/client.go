@@ -48,6 +48,23 @@ func (c *Client) Enroll(ctx context.Context, req EnrollRequest) (EnrollResponse,
 	return out, err
 }
 
+// EnrollManaged binds the host-owned credential to one predeclared device.
+func (c *Client) EnrollManaged(ctx context.Context, id string, req ManagedEnrollRequest) error {
+	scoped := *c
+	httpClient := c.HTTP
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	transport := *httpClient
+	transport.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	scoped.HTTP = &transport
+	err := scoped.doJSON(ctx, http.MethodPost, PathEnroll+"/"+url.PathEscape(id), nil, req, http.StatusNoContent, nil, false)
+	if err == errNoContent {
+		return nil
+	}
+	return err
+}
+
 // Heartbeat reports device liveness. Requires Bearer. uptime_s must be >= 0.
 func (c *Client) Heartbeat(ctx context.Context, req HeartbeatRequest) (HeartbeatResponse, error) {
 	if req.UptimeS < 0 {

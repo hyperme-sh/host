@@ -226,9 +226,14 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		ingressIface = wg.Iface
 		log.Info("userspace wireguard", "service", tunnel.UserspaceService(), "iface", wg.Iface)
 	}
-    capture := nativeContainer(cfg)
-    nvidia, hip, cpu := runtime.NewNVIDIA(), runtime.NewHIP(), runtime.NewCPU()
-    nvidia.Capture, hip.Capture, cpu.Capture = capture, capture, capture
+	if cfg.ManagedDeviceID != "" && cfg.WGIface != "" {
+		wg.Iface = cfg.WGIface
+		wg.ConfigDir = filepath.Join(cfg.StateDir, "wireguard")
+		ingressIface = wg.Iface
+	}
+	capture := nativeContainer(cfg)
+	nvidia, hip, cpu := runtime.NewNVIDIA(), runtime.NewHIP(), runtime.NewCPU()
+	nvidia.Capture, hip.Capture, cpu.Capture = capture, capture, capture
 	return &Agent{
 		cfg:    cfg,
 		client: machineAPIClient(cfg),
@@ -254,6 +259,11 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 
 // Run enrolls if needed, then heartbeats, syncs tunnel, and pulls jobs.
 func (a *Agent) Run(ctx context.Context) error {
+	if a.cfg.ManagedDeviceID != "" {
+		if err := a.cfg.validateManagedRuntime(); err != nil {
+			return err
+		}
+	}
 	if err := a.ensureEnrolled(ctx); err != nil {
 		return err
 	}
@@ -369,6 +379,9 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := a.cfg.validateStateScope(st); err != nil {
+		return err
+	}
 	if st.DeviceSecret == "" {
 		st.DeviceSecret = a.cfg.DeviceSecret
 	}
@@ -420,16 +433,21 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
             return fmt.Errorf("hypermesh: HYPERMESH_HOST_NAME or hostname is required")
         }
     }
-	resp, err := a.client.Enroll(ctx, api.EnrollRequest{
-        HostName: name,
-        WGPublicKey: publicKey,
-		EnrollToken: a.cfg.EnrollToken,
-		ImageHash:   image,
-		HostType:    a.cfg.ReportedHostType(),
-		TermsVersion: accepted.Version,
-		TermsSHA256:  accepted.SHA256,
-		AcceptedAt:   accepted.AcceptedAt,
-	})
+	var resp api.EnrollResponse
+	if a.cfg.ManagedDeviceID != "" {
+		resp, err = a.enrollManaged(ctx, keyDir, publicKey)
+	} else {
+		resp, err = a.client.Enroll(ctx, api.EnrollRequest{
+			HostName:     name,
+			WGPublicKey:  publicKey,
+			EnrollToken:  a.cfg.EnrollToken,
+			ImageHash:    image,
+			HostType:     a.cfg.ReportedHostType(),
+			TermsVersion: accepted.Version,
+			TermsSHA256:  accepted.SHA256,
+			AcceptedAt:   accepted.AcceptedAt,
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("hypermesh: could not enroll this box: %w", err)
 	}
@@ -438,6 +456,7 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 	}
 	a.keyDir = keyDir
 	st = State{
+		ManagedScope: a.cfg.scope(),
 		EnrollTokenHash: tokenHash,
 		WGKeyDir: keyDir,
 		DeviceID:         resp.DeviceID,
@@ -449,6 +468,9 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 	}
 	if err := a.saveState(st); err != nil {
 		return err
+	}
+	if st.ManagedScope != nil {
+		_ = os.Remove(filepath.Join(keyDir, "managed-device-secret.json"))
 	}
 	a.state = st
 	a.client.DeviceSecret = st.DeviceSecret
