@@ -27,6 +27,7 @@ type nativePlan struct {
 	RunID           string                      `json:"run_id"`
 	Environment     string                      `json:"environment_hash"`
 	Hardware        string                      `json:"hardware_fingerprint"`
+	FirstReference  bool                        `json:"first_reference,omitempty"`
 	Run             *hostregistration.NativeRun `json:"run,omitempty"`
 }
 type nativeRemote interface {
@@ -47,6 +48,7 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 	flags.SetOutput(diagnostic)
 	path := flags.String("plan", "", "private native certification plan file (created by plan-certification)")
 	registration := flags.String("registration-plan-sha", "", "saved Mac registration plan digest; planning only")
+	firstReference := flags.Bool("first-reference", false, "plan native measurements for operator review before a class reference exists")
 	approved := flags.String("approve-plan", "", "reviewed native plan digest")
 	run := flags.Bool("run", false, "run the approved native workload and submit its measurements")
 	model := flags.String("model-file", "", "local pinned GGUF")
@@ -59,7 +61,7 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 		return 2
 	}
 	fail := func(err error) int { fmt.Fprintln(diagnostic, err); return 1 }
-	if flags.NArg() != 0 || !filepath.IsAbs(*path) || (planning && !macSHA.MatchString(*registration)) || (!planning && (!*run || !macSHA.MatchString(*approved))) {
+	if (!planning && *firstReference) || flags.NArg() != 0 || !filepath.IsAbs(*path) || (planning && !macSHA.MatchString(*registration)) || (!planning && (!*run || !macSHA.MatchString(*approved))) {
 		return fail(fmt.Errorf("require an absolute --plan; planning requires --registration-plan-sha; execution requires --approve-plan and --run"))
 	}
 	// Resolve only Darwin's fixed root-owned /var and /etc aliases.
@@ -88,13 +90,13 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 		if e != nil {
 			return fail(e)
 		}
-		p = nativePlan{Schema: 1, RegistrationSHA: *registration, RunID: id, Environment: environment, Hardware: hardware}
+		p = nativePlan{Schema: 1, RegistrationSHA: *registration, RunID: id, Environment: environment, Hardware: hardware, FirstReference: *firstReference}
 	} else if err != nil {
 		return fail(err)
 	} else if err = macDecode(raw, &p); err != nil {
 		return fail(err)
 	}
-	if p.Schema != 1 || !macSHA.MatchString(p.RegistrationSHA) || !hostregistration.UUID.MatchString(p.RunID) || !strings.HasPrefix(p.Environment, "sha256:") || !macSHA.MatchString(strings.TrimPrefix(p.Environment, "sha256:")) || !macSHA.MatchString(p.Hardware) || (planning && p.RegistrationSHA != *registration) {
+	if p.Schema != 1 || !macSHA.MatchString(p.RegistrationSHA) || !hostregistration.UUID.MatchString(p.RunID) || !strings.HasPrefix(p.Environment, "sha256:") || !macSHA.MatchString(strings.TrimPrefix(p.Environment, "sha256:")) || !macSHA.MatchString(p.Hardware) || (planning && (p.RegistrationSHA != *registration || p.FirstReference != *firstReference)) {
 		return fail(fmt.Errorf("invalid native plan"))
 	}
 	if !planning && (p.Run == nil || nativePlanDigest(p) != *approved) {
@@ -167,7 +169,17 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 			newPlan = false
 		}
 		if p.Run == nil {
-			result, e := client.PlanNativeCertification(ctx, j.Request, j.DeviceID, j.DeviceSecret, p.RunID, p.Environment, p.Hardware)
+			plan := client.PlanNativeCertification
+			if p.FirstReference {
+				referenceClient, ok := client.(interface {
+					PlanNativeReference(context.Context, hostregistration.Request, string, string, string, string, string) (hostregistration.NativeRun, error)
+				})
+				if !ok {
+					return fail(fmt.Errorf("native reference planning unavailable"))
+				}
+				plan = referenceClient.PlanNativeReference
+			}
+			result, e := plan(ctx, j.Request, j.DeviceID, j.DeviceSecret, p.RunID, p.Environment, p.Hardware)
 			if e != nil {
 				return fail(e)
 			}
@@ -182,7 +194,7 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 		return printNativePlan(out, *path, p)
 	}
 	m := p.Run.Manifest
-	if m.Validate() != nil || m.CollectorCommit != buildinfo.Current() || m.EnvironmentHash != p.Environment || m.Hardware != p.Hardware || p.Run.DeviceID != j.DeviceID || p.Run.RequestID != j.Request.RequestID || p.Run.TenantID != config.Tenant {
+	if (m.Purpose == hostregistration.NativeReferencePurpose) != p.FirstReference || m.Validate() != nil || m.CollectorCommit != buildinfo.Current() || m.EnvironmentHash != p.Environment || m.Hardware != p.Hardware || p.Run.DeviceID != j.DeviceID || p.Run.RequestID != j.Request.RequestID || p.Run.TenantID != config.Tenant {
 		return fail(fmt.Errorf("native workload or installation binding differs"))
 	}
 	evidencePath := *path + ".evidence.json"
