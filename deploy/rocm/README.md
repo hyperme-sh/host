@@ -8,7 +8,7 @@ The default `hypermesh-agent` binary is the AGX / Jetson image. On that image `b
 This image does not run hip-rocm.
 ```
 
-`llama-cpp-vulkan` stays a stub on every image, including a future ROCm one.
+The Linux amd64 agent also supports the separate [managed Vulkan runtime](#managed-vulkan-leases).
 
 ## What this scaffold is
 
@@ -48,3 +48,18 @@ Linux AMD64 release payloads now use `rocm,cpu` build tags. HIP binds the exact
 GGUF and catalog alias and pulls the pinned image. The existing HIP SDK/driver,
 allocation, model-context and physical acceptance requirements still apply.
 See [the platform matrix](../../docs/platform-releases.md).
+
+## Managed Vulkan leases
+
+The Plane job selects `backend=llama-cpp-vulkan` and `runtime=runc`. Install Docker
+and the AMDGPU kernel driver on the host. The agent selects one AMDGPU render node
+and refuses missing or ambiguous nodes. It gives the approved Vulkan image access
+to that node and the read-only GGUF through the managed workload network. The
+runtime image must provide RADV and a Vulkan-enabled llama-server. The upstream
+`ghcr.io/ggml-org/llama.cpp:server-vulkan` channel provides that layout.
+
+Configure `HYPERMESH_RUNTIME_IMAGE_REPOSITORIES` with the deployment-approved
+repository. The Plane supplies the runtime image reference and the GGUF hash.
+For a 32K profile set `HYPERMESH_LLAMA_CTX_SIZE=32768` in the agent service.
+The Vulkan launch uses one slot and disables context shifting. The usual lease
+health check, WireGuard forwarding, and stop/recovery behavior apply.

@@ -29,6 +29,9 @@ func TestResolveBackendStubsAndUnknown(t *testing.T) {
 		if backend == BackendLlamaCppCPU && (MetalImageEnabled() || CPUImageEnabled()) {
 			continue
 		}
+		if backend == BackendLlamaCppVulkan && VulkanImageEnabled() {
+			continue
+		}
 		if backend == BackendHIPROCm && HIPImageEnabled() {
 			continue
 		}

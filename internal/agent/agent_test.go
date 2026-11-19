@@ -1358,7 +1358,7 @@ func TestLeaseStartBackends(t *testing.T) {
 		{name: "cuda-jetson", backend: "cuda-jetson", wantPass: true, wantDocker: true, wantReason: "lease_start"},
 		{name: "cuda-sm87", backend: "cuda-sm87", wantPass: true, wantDocker: true, wantReason: "lease_start"},
 		{name: "llama-cpp-cpu", backend: "llama-cpp-cpu", wantPass: false, wantDocker: false, wantReason: "This image does not run llama-cpp-cpu."},
-		{name: "llama-cpp-vulkan", backend: "llama-cpp-vulkan", wantPass: false, wantDocker: false, wantReason: "This image does not run llama-cpp-vulkan."},
+		{name: "unknown-backend", backend: "unknown-backend", wantPass: false, wantDocker: false, wantReason: "This image does not run unknown-backend."},
 		{name: "hip-rocm", backend: "hip-rocm", wantPass: false, wantDocker: false, wantReason: "This image does not run hip-rocm."},
 		{name: "disk-io", backend: "disk-io", wantPass: false, wantDocker: false, wantReason: "This image does not run disk-io."},
 		{name: "unknown", backend: "not-a-backend", wantPass: false, wantDocker: false, wantReason: "This image does not run not-a-backend."},
@@ -2250,6 +2250,9 @@ func TestStubBackendFailsLabSoakAndInstanceCheck(t *testing.T) {
 	for _, kind := range kinds {
 		for _, backend := range backends {
 			if backend == "llama-cpp-cpu" && (runtime.MetalImageEnabled() || runtime.CPUImageEnabled()) {
+				continue
+			}
+			if backend == "llama-cpp-vulkan" && runtime.VulkanImageEnabled() {
 				continue
 			}
 			if backend == "hip-rocm" && runtime.HIPImageEnabled() {

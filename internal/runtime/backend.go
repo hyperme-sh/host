@@ -1,6 +1,9 @@
 package runtime
 
-import "strings"
+import (
+	"runtime"
+	"strings"
+)
 
 // lease_start backend enum (host-runtimes.md). runtime stays "nvidia"
 // for oci cuda-jetson. That fixed field is not overloaded. Loaders stay
@@ -42,7 +45,8 @@ const (
 	// LlamaCppHost is llama-cpp-cpu on a darwin binary (Metal). Jetson
 	// Linux builds still stub llama-cpp-cpu.
 	LlamaCppHost
- CPUContainer
+	CPUContainer
+	VulkanContainer
 )
 
 // NormalizeBackend maps omitted and cuda-sm87 to cuda-jetson.
@@ -64,8 +68,8 @@ func FailReason(backend string) string {
 // Omitted and cuda-sm87 are cuda-jetson (NVIDIA container path).
 // hip-rocm is HIPROCm only on a -tags rocm image; the default AGX /
 // Jetson image stub-fails with FailReason. llama-cpp-cpu is LlamaCppHost
-// only on darwin; Jetson Linux stub-fails. llama-cpp-vulkan stays stub
-// on every image. Unknown (including disk-io, llama-cpp-metal) fails.
+// only on darwin. llama-cpp-vulkan is available on Linux amd64 and
+// requires an AMD render node at workload startup. Unknown backends fail.
 // Do not set HSA_OVERRIDE.
 func ResolveBackend(backend string) (Path, string) {
 	name := strings.TrimSpace(backend)
@@ -77,8 +81,15 @@ func ResolveBackend(backend string) (Path, string) {
 			return HIPROCm, ""
 		}
 		return StubFail, FailReason(name)
+	case BackendLlamaCppVulkan:
+		if VulkanImageEnabled() {
+			return VulkanContainer, ""
+		}
+		return StubFail, FailReason(name)
 	case BackendLlamaCppCPU:
-        if CPUImageEnabled() {return CPUContainer, ""}
+		if CPUImageEnabled() {
+			return CPUContainer, ""
+		}
 		if metalImageEnabled() {
 			return LlamaCppHost, ""
 		}
@@ -91,7 +102,7 @@ func ResolveBackend(backend string) (Path, string) {
 // Runnable is a start path this image may take (not StubFail).
 func (p Path) Runnable() bool {
 	switch p {
-	case NVIDIAContainer, HIPROCm, LlamaCppHost, CPUContainer:
+	case NVIDIAContainer, HIPROCm, LlamaCppHost, CPUContainer, VulkanContainer:
 		return true
 	default:
 		return false
@@ -108,7 +119,7 @@ func LogLabel(backend string) string {
 	case HIPROCm:
 		return BackendHIPROCm
 	case CPUContainer:
-        return BackendLlamaCppCPU
+		return BackendLlamaCppCPU
 	case LlamaCppHost:
 		return MetalLogLabel
 	default:
@@ -134,3 +145,6 @@ func HIPImageEnabled() bool { return hipImageEnabled() }
 
 // MetalImageEnabled is true only for a darwin binary.
 func MetalImageEnabled() bool { return metalImageEnabled() }
+
+// VulkanImageEnabled reports whether this build supports AMD Vulkan leases.
+func VulkanImageEnabled() bool { return runtime.GOOS == "linux" && runtime.GOARCH == "amd64" }

@@ -56,7 +56,7 @@ func (a *Agent) runCertWorkload(ctx context.Context, job api.Job, observe func(c
 	backend, _ := runtime.ResolveBackend(job.Backend)
 	// Container backends all bind the verified GGUF and catalog alias.
 	// Native Metal still needs its own pinned service lifecycle.
-	if (backend != runtime.NVIDIAContainer && backend != runtime.HIPROCm && backend != runtime.CPUContainer) || (backend == runtime.NVIDIAContainer && job.Runtime != "nvidia") {
+	if (backend != runtime.NVIDIAContainer && backend != runtime.HIPROCm && backend != runtime.CPUContainer && backend != runtime.VulkanContainer) || (backend == runtime.NVIDIAContainer && job.Runtime != "nvidia") {
 		return fail("pinned certification requires a supported container runtime")
 	}
 	if a.localLease() != nil {

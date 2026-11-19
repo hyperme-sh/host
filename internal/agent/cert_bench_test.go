@@ -103,7 +103,7 @@ func TestCertRejectsUnpinnedOrBusyWorkBeforeDocker(t *testing.T) {
 		{"unknown suite",func(a *Agent,j *api.Job){j.SuiteID="unknown"}},
 		{"missing job",func(a *Agent,j *api.Job){j.JobID=""}},
 		{"missing runtime",func(a *Agent,j *api.Job){j.Runtime=""}},
-		{"unsupported backend",func(a *Agent,j *api.Job){j.Backend="llama-cpp-vulkan"}},
+		{"unsupported backend",func(a *Agent,j *api.Job){j.Backend="unknown-backend"}},
 		{"live lease",func(a *Agent,j *api.Job){a.setLease(&runtime.Handle{LeaseID:"busy"})}},
 		{"missing file",func(a *Agent,j *api.Job){a.cfg.GGUFPath=filepath.Join(a.cfg.StateDir,"absent")}},
 	}

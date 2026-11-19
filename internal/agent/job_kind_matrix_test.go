@@ -73,10 +73,10 @@ func TestJobKindFailPassMatrix(t *testing.T) {
 			kind: api.KindPathB,
 			job: api.Job{
 				JobID: "m-lab-stub", Kind: api.KindPathB, DeviceID: testDevice,
-				SuiteID: "thin-v1", Runtime: "nvidia", Backend: "llama-cpp-vulkan",
+				SuiteID: "thin-v1", Runtime: "nvidia", Backend: "unknown-backend",
 			},
 			wantPass:   false,
-			wantReason: "This image does not run llama-cpp-vulkan.",
+			wantReason: "This image does not run unknown-backend.",
 			forbidHash: true,
 			noDocker:   true,
 		},
@@ -452,6 +452,9 @@ func TestJobKindStubBackendExactReasons(t *testing.T) {
 	for _, kind := range kinds {
 		for _, backend := range backends {
 			if backend == "llama-cpp-cpu" && (runtime.MetalImageEnabled() || runtime.CPUImageEnabled()) {
+				continue
+			}
+			if backend == "llama-cpp-vulkan" && runtime.VulkanImageEnabled() {
 				continue
 			}
 			if backend == "hip-rocm" && runtime.HIPImageEnabled() {

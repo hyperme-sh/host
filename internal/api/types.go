@@ -195,10 +195,10 @@ const (
 )
 
 // Job is GET /agent/jobs. One pending job or 204. No suite payload.
-// Runtime stays "nvidia" for oci cuda-jetson. Backend is optional
+// Runtime is "nvidia" for cuda-jetson and "runc" for managed Vulkan. Backend is optional
 // (cuda-jetson | cuda-sm87 | llama-cpp-cpu | llama-cpp-vulkan | hip-rocm).
 // Omitted = cuda-jetson. Do not overload Runtime. disk-io is not in the enum.
-// Default AGX image stub-fails hip-rocm / llama-cpp-cpu / llama-cpp-vulkan.
+// The default Jetson build does not enable the ROCm, CPU, or AMD Vulkan paths.
 // hip-rocm is a real path only on a -tags rocm image; llama-cpp-cpu is
 // Metal only on darwin. llama-cpp-metal is not in the enum.
 type ModelConfiguration struct {
