@@ -97,10 +97,23 @@ func (a *Agent) managedCredential(keyDir string) (string, error) {
 	if decoded, err := base64.RawURLEncoding.DecodeString(secret[len("hm_dev_"):]); err != nil || len(decoded) != 24 {
 		return "", fmt.Errorf("hypermesh: invalid managed enrollment credential file")
 	}
+	dir, err := os.Open(keyDir)
+	if err != nil {
+		return "", err
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		return "", err
+	}
 	return secret, nil
 }
 
 func (a *Agent) enrollManaged(ctx context.Context, keyDir, publicKey string) (api.EnrollResponse, error) {
+	// This path runs only for fresh enrollment or its retry. Existing
+	// identities return before reaching it, preserving their owner posture.
+	if err := writeJSON0600(a.sellPath(), SellPosture{SellState: api.SellPaused, Source: SellSourceOwner}); err != nil {
+		return api.EnrollResponse{}, err
+	}
 	secret, err := a.managedCredential(keyDir)
 	if err != nil {
 		return api.EnrollResponse{}, err

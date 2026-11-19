@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,6 +21,7 @@ func (roundTrip enrollmentRoundTripper) RoundTrip(req *http.Request) (*http.Resp
 
 func TestManagedEnrollmentRetryUsesSameVerifier(t *testing.T) {
 	cfg := Config{
+		StateDir:        t.TempDir(),
 		ControlPlaneURL: "https://production.example",
 		TenantID:        "4592ac2e-5786-4100-a324-c06ceaff6211",
 		ManagedDeviceID: "cbb164d9-6b66-4d2f-b302-b62fd354e263",
@@ -27,7 +29,11 @@ func TestManagedEnrollmentRetryUsesSameVerifier(t *testing.T) {
 	}
 	client := api.NewClient(cfg.ControlPlaneURL, cfg.TenantID)
 	var calls []api.ManagedEnrollRequest
+	a := &Agent{cfg: cfg, client: client}
 	client.HTTP.Transport = enrollmentRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if sell := a.effectiveSell(); sell.SellState != api.SellPaused || sell.Until != "" {
+			t.Fatalf("managed enrollment contacted Plane without an indefinite pause: %+v", sell)
+		}
 		if req.URL.Path != api.PathEnroll+"/"+cfg.ManagedDeviceID {
 			t.Fatalf("unexpected scoped path: %s", req.URL.Path)
 		}
@@ -42,7 +48,6 @@ func TestManagedEnrollmentRetryUsesSameVerifier(t *testing.T) {
 		return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader(""))}, nil
 	})
 	dir := t.TempDir()
-	a := &Agent{cfg: cfg, client: client}
 	if _, err := a.enrollManaged(context.Background(), dir, "example-public-key"); err == nil {
 		t.Fatal("lost response was reported as success")
 	}
@@ -69,5 +74,15 @@ func TestManagedEnrollmentRefusesOtherStoredScopes(t *testing.T) {
 	cfg.ControlPlaneURL = "https://test.example"
 	if err := cfg.validateStateScope(state); err == nil {
 		t.Fatal("accepted a production credential for a different plane")
+	}
+}
+
+func TestManagedDefaultModelPathUsesEffectiveStateDirectory(t *testing.T) {
+	t.Setenv("HYPERMESH_MANAGED_DEVICE_ID", "cbb164d9-6b66-4d2f-b302-b62fd354e263")
+	t.Setenv("HYPERMESH_GGUF_PATH", "")
+	cfg := FromEnv()
+	cfg.StateDir = t.TempDir()
+	if got, want := cfg.GGUFHostPath(), filepath.Join(cfg.StateDir, "models", "model.gguf"); got != want {
+		t.Fatalf("managed model path = %q, want %q", got, want)
 	}
 }

@@ -167,6 +167,10 @@ func FromEnv() Config {
 	if plane == "" && managedID == "" {
 		plane = defaultControlPlane
 	}
+	modelPath := os.Getenv("HYPERMESH_GGUF_PATH")
+	if modelPath == "" && managedID == "" {
+		modelPath = DefaultModelPath
+	}
 	return Config{
 		ControlPlaneURL:           plane,
 		TenantID:                  os.Getenv("HYPERMESH_TENANT_ID"),
@@ -183,7 +187,7 @@ func FromEnv() Config {
 		ListenPort:                envOr("HYPERMESH_LISTEN_PORT", defaultListenPort),
 		LeaseReadyWait:            secondsEnv("HYPERMESH_LEASE_START_READY_TIMEOUT_S", defaultLeaseReadyTimeout),
 		CompletionsURL:            os.Getenv("HYPERMESH_COMPLETIONS_URL"),
-		GGUFPath:                  envOr("HYPERMESH_GGUF_PATH", DefaultModelPath),
+		GGUFPath:                  modelPath,
 		PrivateBlobAccount:        strings.TrimSpace(os.Getenv("HYPERMESH_MODEL_BLOB_ACCOUNT")),
 		DiskFloor:                 strings.TrimSpace(os.Getenv("HYPERMESH_DISK_FLOOR_BYTES")),
 		DiskMargin:                strings.TrimSpace(os.Getenv("HYPERMESH_DISK_MARGIN_BYTES")),
@@ -427,9 +431,12 @@ func (c Config) PublishPort() string {
 }
 
 // GGUFHostPath is the host weights file for docker -v ...:/models/model.gguf:ro.
-// Empty means lease_start must refuse. FromEnv does not return empty:
-// an unset HYPERMESH_GGUF_PATH is DefaultModelPath. An explicit value,
-// including a path under a home directory, is returned unchanged.
+// Managed profiles keep their default model and cache under their state directory.
+// Unmanaged profiles use the default supplied by FromEnv.
 func (c Config) GGUFHostPath() string {
-	return strings.TrimSpace(c.GGUFPath)
+	path := strings.TrimSpace(c.GGUFPath)
+	if path == "" && c.ManagedDeviceID != "" {
+		return filepath.Join(c.StateDir, "models", "model.gguf")
+	}
+	return path
 }
