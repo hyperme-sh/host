@@ -2129,3 +2129,21 @@ Define a distinct `HYPERMESH_WG_IFACE` before running the agent. Use a matching
 userspace WireGuard service where required. The Plane and Gateway must assign
 this interface an overlay that is disjoint from other interfaces on the
 machine. Restore the private state directory as part of a Host rebuild.
+
+### Native Halo TEST profile
+
+HALO395-1 and HALO495-1 use the managed Vulkan backend through a dedicated TEST
+agent. Create `/var/lib/hypermesh-halo-test/models` under a root-owned mode
+`0700` state directory. Generate the prerequisite plan with `--memory-mode uma-vulkan`,
+`--model-dir /var/lib/hypermesh-halo-test/models`, `--wireguard-mode kernel`, and
+the TEST Host installation readiness URL. The host needs the existing AMDGPU and
+Mesa packages, Docker, and native WireGuard. Use `plan-agent` with the signed
+TEST payload, TEST control plane, and the machine's matching Halo alias.
+
+Run `hypermesh-deploy install-halo-test --plan FILE --approve-plan SHA256` as
+root. Sign in as the canonical TEST host owner and approve the registration in
+the TEST dashboard. The command records a paused device ID and stages the
+separate systemd service with an isolated identity, model cache, WireGuard
+interface and moving TEST update channel. Bind the new ID and the retained
+production ID to the machine's shared capacity slot before starting the TEST
+service.

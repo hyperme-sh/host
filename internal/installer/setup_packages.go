@@ -35,10 +35,20 @@ func hasNativePackage(installed map[string]string, name, arch string) bool {
 }
 func protectedSetupPackage(name string) bool {
 	name = packageBase(name)
-	for _, prefix := range []string{"radxa", "rockchip", "rknpu", "libmali", "mali-", "cix-", "axcl", "libaxcl", "axera", "dxrt", "dx-", "sophon", "libsophon", "sophgo", "libedgetpu", "gasket", "apex", "renesas", "rzv", "u-boot", "edk2", "firmware-", "linux-", "nvidia-", "libnvidia-", "cuda-", "libcuda", "rocm", "hip-", "libhip", "hsa-", "libhsa", "amdgpu", "mesa-", "libvulkan", "libdrm", "openssh", "systemd", "network-manager", "netplan", "grub", "shim", "zfs", "mdadm", "lvm", "samba", "nfs-"} {
+	for _, prefix := range []string{"radxa", "rockchip", "rknpu", "libmali", "mali-", "cix-", "axcl", "libaxcl", "axera", "dxrt", "dx-", "sophon", "libsophon", "sophgo", "libedgetpu", "gasket", "apex", "renesas", "rzv", "u-boot", "edk2", "firmware-", "linux-", "nvidia-", "libnvidia-", "cuda-", "libcuda", "rocm", "hip-", "libhip", "hsa-", "libhsa", "amdgpu", "openssh", "systemd", "network-manager", "netplan", "grub", "shim", "zfs", "mdadm", "lvm", "samba", "nfs-"} {
 		if strings.HasPrefix(name, prefix) { return true }
 	}
 	return false
+}
+
+func protectedProfilePackage(profile, name string) bool {
+	if strings.HasSuffix(profile, "-amd-halo-vulkan") {
+		base := packageBase(name)
+		if strings.HasPrefix(base, "mesa-") || strings.HasPrefix(base, "libvulkan") || strings.HasPrefix(base, "libdrm") {
+			return true
+		}
+	}
+	return protectedSetupPackage(name)
 }
 
 func parseInstalledPackages(text string) (map[string]string, error) {

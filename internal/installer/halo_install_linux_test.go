@@ -3,6 +3,8 @@
 package installer
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -24,7 +26,7 @@ func TestHaloNativeScope(t *testing.T) {
 			facts := hardware.Facts{Arch: "amd64", Processor: tc.cpu, Vulkan: true}
 			r := Resources{SystemBytes: tc.memory * GiB, AvailableSystemBytes: 40 * GiB, DiskFreeBytes: 64 * GiB,
 				UMA: true, UMARuntime: &UMARuntime{Backend: "vulkan", FreeBytes: 40 * GiB, TotalBytes: 64 * GiB}}
-			fresh := Plan{Hardware: hardware.Recommend(facts), Resources: ResourceReport{MemoryMode: "uma", Resources: r, ModelDirectory: haloState + "/models"}}
+			fresh := Plan{Hardware: hardware.Recommend(facts), Resources: ResourceReport{MemoryMode: haloMemoryMode, Resources: r, ModelDirectory: haloState + "/models"}}
 			for _, os := range []struct{ id, version string }{{"ubuntu", "24.04"}, {"debian", "13"}} {
 				profile, err := selectSetupProfile(fresh, SetupPlatform{OS: os.id, Version: os.version}, "auto")
 				if err != nil || profile.ID != os.id+"-amd-halo-vulkan" {
@@ -34,7 +36,7 @@ func TestHaloNativeScope(t *testing.T) {
 			setup, _ := selectSetupProfile(fresh, SetupPlatform{OS: "debian", Version: "13"}, "auto")
 			p := agentInstallPlan{ControlPlane: n.Plane, Channel: "test", HostName: tc.name,
 				TenantID: "4d0316b7-ba19-40c9-931b-39a1ba4cd81a",
-				Setup:    SetupPlan{Preflight: fresh, WireGuardMode: "kernel", Profile: setup}}
+				Setup:    SetupPlan{Preflight: fresh, WireGuardMode: "kernel", Profile: setup, ReadinessURL: n.Plane + "/api/v1/hypermesh/public/host-installation"}}
 			j, err := newRegistration(p, n.Issuer, n.Dashboard, haloClass, fresh)
 			if err != nil || !j.Request.PauseSelling {
 				t.Fatalf("expected paused TEST registration: %v", err)
@@ -74,5 +76,28 @@ func TestHaloNativeScope(t *testing.T) {
 				t.Error("allowed below-minimum OS-visible RAM")
 			}
 		})
+	}
+}
+
+func TestHaloVulkanPlanWithROCmInstalled(t *testing.T) {
+	var out, diagnostics bytes.Buffer
+	detect := func(context.Context) hardware.Profile {
+		return hardware.Recommend(hardware.Facts{
+			Arch: "amd64", Processor: "AMD Ryzen AI Max+ 395", HIP: true, GPU: "ROCm GPU",
+		})
+	}
+	probe := func(_ context.Context, _, mode string, allocation int64) (Resources, error) {
+		if mode != haloMemoryMode || allocation != 0 {
+			t.Fatalf("unexpected Halo probe mode or allocation: %s %d", mode, allocation)
+		}
+		return Resources{UMA: true, SystemBytes: 112 * GiB, AvailableSystemBytes: 40 * GiB, DiskFreeBytes: 64 * GiB,
+			UMARuntime: &UMARuntime{Backend: "vulkan", FreeBytes: 40 * GiB, TotalBytes: 64 * GiB}}, nil
+	}
+	code := runPlan(context.Background(), []string{"--memory-mode", haloMemoryMode, "--model-dir", ".",
+		"--aiuditor-check-url", "https://example.invalid/ready"}, &out, &diagnostics, probe, detect,
+		func(context.Context, string) error { return nil })
+	var plan Plan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil || code != 0 || !haloSetup(plan) {
+		t.Fatalf("Halo Vulkan plan failed: code=%d err=%v blockers=%v %s", code, err, plan.Blockers, diagnostics.String())
 	}
 }

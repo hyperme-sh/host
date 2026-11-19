@@ -34,6 +34,7 @@ func validateHaloScope(p agentInstallPlan, issuer, dashboard string, fresh Plan)
 		alias == "halo495-1" && halo495Processor.MatchString(processor)
 	if !matches || !haloSetup(fresh) || p.ControlPlane != network.Plane || issuer != network.Issuer ||
 		dashboard != network.Dashboard || p.Channel != "test" || p.Setup.HeadlessRequested ||
+		p.Setup.ReadinessURL != network.Plane+"/api/v1/hypermesh/public/host-installation" ||
 		p.Setup.WireGuardMode != "kernel" || p.Setup.Preflight.Resources.ModelDirectory != haloState+"/models" {
 		return fmt.Errorf("Halo setup requires the matching TEST alias, TEST channel, kernel WireGuard and isolated model directory")
 	}

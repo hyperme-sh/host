@@ -133,7 +133,7 @@ func runSetupPlan(ctx context.Context, args []string, out, diagnostic io.Writer,
 	preflight func(context.Context, []string, io.Writer, io.Writer) int) int {
 	flags := flag.NewFlagSet("plan-setup", flag.ContinueOnError)
 	flags.SetOutput(diagnostic)
-	mode := flags.String("memory-mode", "", "uma or discrete")
+	mode := flags.String("memory-mode", "", "cpu, uma, uma-vulkan or discrete")
 	directory := flags.String("model-dir", "", "existing model-cache directory")
 	allocation := flags.Int64("uma-gib", 0, "optional diagnostic allocation in GiB; omit for minimum-only installation")
 	address := flags.String("aiuditor-check-url", "", "readiness URL (HTTPS)")
@@ -276,7 +276,7 @@ func buildSetupPlan(ctx context.Context, p Plan, requested, wireguardMode string
 			result.Platform.PackageStateSHA256 = hex.EncodeToString(digest[:])
 			result.Platform.ProtectedPackages = []PackageChange{}
 			for name, version := range installed {
-				if protectedSetupPackage(name) {
+				if protectedProfilePackage(result.Profile.ID, name) {
 					result.Platform.ProtectedPackages = append(result.Platform.ProtectedPackages, PackageChange{name, version, version})
 				}
 			}

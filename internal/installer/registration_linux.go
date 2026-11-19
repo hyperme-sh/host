@@ -209,7 +209,7 @@ func registrationPackages(p SetupPlan,installed map[string]string)([]PackageChan
  protected:=map[string]string{}
  for _,pkg:=range p.Platform.ProtectedPackages {protected[pkg.Name]=pkg.To}
  for name,version:=range protected {if installed[name]!=version{return nil,fmt.Errorf("protected package %s changed from %s to %s; review the platform change",name,version,installed[name])}}
- for name:=range installed {if protectedSetupPackage(name)&&protected[name]==""{return nil,fmt.Errorf("protected package %s was added; review the platform change",name)}}
+ for name:=range installed {if protectedProfilePackage(p.Profile.ID,name)&&protected[name]==""{return nil,fmt.Errorf("protected package %s was added; review the platform change",name)}}
  // Retain exact versions and architecture checks for approved additions while
  // comparing against the current unrelated inventory rather than an old hash.
  current:=map[string]string{}
