@@ -60,7 +60,7 @@ func runNativeMac(ctx context.Context, args []string, out, diagnostic io.Writer,
 			}
 			return c, e
 		}, measure: certmeasure.Run}
-	return runMacNativeCertification(ctx, args, out, diagnostic, planning, d)
+	return runNativeCertification(ctx, args, out, diagnostic, planning, d)
 }
 func RunActivateAgent(_ context.Context, _ []string, _ io.Writer, diagnostic io.Writer) int {
 	fmt.Fprintln(diagnostic, "Native certificates leave the experimental Mac class paused; activation requires its separate supported owner contract")

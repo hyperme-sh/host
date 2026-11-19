@@ -114,7 +114,7 @@ func TestMacFirstReferenceFlagFreezesPlanPurpose(t *testing.T) {
 		remote:    func(string, string) (nativeRemote, error) { return remote, nil }}
 	args := []string{"--registration-plan-sha", f.journal(t).PlanSHA256, "--plan", path}
 	var out, diag bytes.Buffer
-	if code := runMacNativeCertification(context.Background(), append(args, "--first-reference"), &out, &diag, true, deps); code != 0 {
+	if code := runNativeCertification(context.Background(), append(args, "--first-reference"), &out, &diag, true, deps); code != 0 {
 		t.Fatal(diag.String())
 	}
 	var current nativePlan
@@ -123,7 +123,7 @@ func TestMacFirstReferenceFlagFreezesPlanPurpose(t *testing.T) {
 		current.Run.Manifest.Purpose != hostregistration.NativeReferencePurpose || current.Run.Manifest.DecodeTokS != 0 {
 		t.Fatal("native first-reference purpose was not retained")
 	}
-	if code := runMacNativeCertification(context.Background(), args, &out, &diag, true, deps); code == 0 {
+	if code := runNativeCertification(context.Background(), args, &out, &diag, true, deps); code == 0 {
 		t.Fatal("accepted retry with a mismatched plan purpose")
 	}
 }
@@ -168,7 +168,7 @@ func TestNativePlanningAndUploadRetriesRetainIdentityAndWork(t *testing.T) {
 	planArgs := []string{"--registration-plan-sha", j.PlanSHA256, "--plan", path}
 	call := func(planning bool, args []string) (int, string, string) {
 		var out, diag bytes.Buffer
-		code := runMacNativeCertification(context.Background(), args, &out, &diag, planning, d)
+		code := runNativeCertification(context.Background(), args, &out, &diag, planning, d)
 		return code, out.String(), diag.String()
 	}
 	if code, _, diag := call(true, planArgs); code == 0 || !strings.Contains(diag, "lost planning response") {
@@ -282,6 +282,29 @@ func TestNativeRuntimeResolutionRequiresTrustedOwnershipAndModes(t *testing.T) {
 			got := trustedNativeRuntime(binary, root)
 			if (got == nil) != (kind == "trusted") {
 				t.Fatalf("%s: %v", kind, got)
+			}
+		})
+	}
+}
+
+func TestNativeVulkanEvidenceBindsBothHaloClasses(t *testing.T) {
+	for _, hardwareClass := range []string{"amd-ryzen-ai-max-395", "amd-ryzen-ai-max-495"} {
+		t.Run(hardwareClass, func(t *testing.T) {
+			r, m := nativeFixtureReport()
+			m.ClassID, m.HardwareClassID = "amd-halo-vulkan-lab", hardwareClass
+			m.Protocol, m.OS, m.Arch, m.Device = hostregistration.NativeVulkanProtocol, "linux", "amd64", "Vulkan0"
+			r.OS, r.Arch, r.Device, r.Backend = m.OS, m.Arch, m.Device, "vulkan"
+			for i := range r.Samples {
+				raw := bytes.ReplaceAll(r.Samples[i].Raw, []byte("MTL0"), []byte("Vulkan0"))
+				r.Samples[i].Raw = bytes.ReplaceAll(raw, []byte("MTL,BLAS"), []byte("Vulkan,BLAS"))
+			}
+			e, err := nativeEvidence(r, m)
+			if err != nil || len(e.Samples) != 3 || e.Samples[0].Backend != "vulkan" || !e.CleanupComplete {
+				t.Fatalf("valid Vulkan samples refused: %v", err)
+			}
+			r.Samples[0].Raw = bytes.ReplaceAll(r.Samples[0].Raw, []byte("Vulkan,BLAS"), []byte("CUDA"))
+			if _, err := nativeEvidence(r, m); err == nil {
+				t.Fatal("accepted non-Vulkan samples for Vulkan certification")
 			}
 		})
 	}

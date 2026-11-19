@@ -122,3 +122,26 @@ the lesser of free GPU GTT and available system RAM, with a runtime reserve.
 The fixed firmware VRAM carveout alone is too small for this workload.
 On Ubuntu 26.10 the b12180 Vulkan archive also needs the distro's
 `libssl3t64` compatibility package for the OpenSSL 3 ABI.
+
+### Native Vulkan certification on a Halo TEST installation
+
+Use the plan digest from the isolated Halo TEST installer. Both the TEST agent
+and any other local Hypermesh agent must be inactive and have no saved lease.
+The Plane needs a reviewed Vulkan reference and collector pins, and the exact
+TEST enrollment needs a shared physical capacity binding.
+
+```sh
+sudo hypermesh-host plan-certification --halo-test \
+  --registration-plan-sha REGISTRATION_SHA256 \
+  --plan /var/lib/hypermesh-halo-test/certification.json
+sudo hypermesh-host certify-agent --halo-test \
+  --plan /var/lib/hypermesh-halo-test/certification.json \
+  --approve-plan CERTIFICATION_PLAN_SHA256 --run \
+  --model-file /absolute/path/to/model.gguf \
+  --runtime-file /absolute/path/to/llama-bench \
+  --artifact-dir /var/lib/hypermesh-halo-test/certification-artifacts
+```
+
+The runtime must be a root-owned executable under root-owned, non-writable
+ancestors. If the upload response is lost, retry the approved plan using its
+saved evidence. The command leaves local services inactive and selling paused.
