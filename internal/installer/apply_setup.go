@@ -78,7 +78,7 @@ func validateSetupApprovalPolicy(p SetupPlan, approved string, installed bool) e
   }
 	}
 	if validateEndpoint(p.ReadinessURL)!=nil || p.Preflight.Resources.ModelDirectory=="" ||
-		(p.Preflight.Resources.MemoryMode!="cpu" && p.Preflight.Resources.MemoryMode!="uma" && p.Preflight.Resources.MemoryMode!="discrete") {
+		(p.Preflight.Resources.MemoryMode!="cpu" && p.Preflight.Resources.MemoryMode!="uma" && p.Preflight.Resources.MemoryMode!=haloMemoryMode && p.Preflight.Resources.MemoryMode!="discrete") {
 		return fmt.Errorf("plan lacks valid preflight inputs; regenerate it")
 	}
 	if p.WireGuardMode!="kernel" && p.WireGuardMode!="userspace" { return fmt.Errorf("invalid WireGuard mode") }
@@ -95,7 +95,7 @@ func validateSetupApprovalPolicy(p SetupPlan, approved string, installed bool) e
 		base:=packageBase(pkg.Name)
 		if _,arch,qualified:=strings.Cut(pkg.Name,":"); qualified && arch!=normalizedSetupArch(p.Preflight.Hardware.Facts.Arch) { return fmt.Errorf("foreign package architecture is outside this plan") }
 		if !setupPackageRE.MatchString(pkg.Name) || !setupVersionRE.MatchString(pkg.To) || pkg.From!="" ||
-			protectedSetupPackage(pkg.Name) || seen[base] || (i>0 && p.Packages[i-1].Name>=pkg.Name) {
+			protectedProfilePackage(p.Profile.ID,pkg.Name) || seen[base] || (i>0 && p.Packages[i-1].Name>=pkg.Name) {
 			return fmt.Errorf("plan contains an invalid, duplicate or protected package change")
 		}
 		seen[base]=true

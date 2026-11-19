@@ -36,6 +36,7 @@ type Request struct {
  RequestID string `json:"request_id"`
  HostName string `json:"host_name"`
  ClassID string `json:"class_id"`
+ PauseSelling bool `json:"pause_selling,omitempty"`
  Hardware Hardware `json:"hardware"`
  WGPublicKey string `json:"wg_public_key"`
  DeviceSecretHash string `json:"device_secret_hash"`

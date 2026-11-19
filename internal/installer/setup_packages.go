@@ -41,6 +41,16 @@ func protectedSetupPackage(name string) bool {
 	return false
 }
 
+func protectedProfilePackage(profile, name string) bool {
+	if strings.HasSuffix(profile, "-amd-halo-vulkan") {
+		base := packageBase(name)
+		if strings.HasPrefix(base, "mesa-") || strings.HasPrefix(base, "libvulkan") || strings.HasPrefix(base, "libdrm") {
+			return true
+		}
+	}
+	return protectedSetupPackage(name)
+}
+
 func parseInstalledPackages(text string) (map[string]string, error) {
 	installed := map[string]string{}
 	for _, line := range strings.Split(text, "\n") {

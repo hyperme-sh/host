@@ -42,6 +42,14 @@ func (c Config) scope() *managedScope {
 	}
 }
 
+// RegisteredProfileState records an already registered device in a dedicated profile.
+func (c Config) RegisteredProfileState(keyDir, prefix, secret string) State {
+	return State{
+		ManagedScope: c.scope(), WGKeyDir: keyDir, DeviceID: c.ManagedDeviceID,
+		CredentialPrefix: prefix, DeviceSecret: secret,
+	}
+}
+
 func (c Config) validateStateScope(st State) error {
 	expected := c.scope()
 	if expected == nil && st.ManagedScope == nil {
