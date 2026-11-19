@@ -108,3 +108,33 @@ func TestNativeFirstReferencePlanBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeVulkanManifestBindsHardwareClassAndDevice(t *testing.T) {
+	for _, alias := range []string{"halo395-1", "halo495-1"} {
+		t.Run(alias, func(t *testing.T) {
+			m := NativeManifest{
+				InventoryEpoch: time.Now().UTC().Format(time.RFC3339Nano), SuiteID: "pack-v1",
+				CatalogID: "halo-model", ClassID: "amd-halo-vulkan-lab", HardwareClassID: haloNativeClass(alias),
+				Purpose: nativeCertificatePurpose, Protocol: NativeVulkanProtocol,
+				FileHash: "sha256:" + strings.Repeat("a", 64), RuntimeSHA256: strings.Repeat("b", 64),
+				CollectorCommit: strings.Repeat("d", 40), EnvironmentHash: "sha256:" + strings.Repeat("e", 64),
+				Hardware: strings.Repeat("f", 64), Device: "Vulkan0", OS: "linux", Arch: "amd64",
+				Samples: 3, GeneratedTokens: 32, ContextTokens: 4096, DecodeTokS: 40, SizeBytes: 3,
+			}
+			if err := m.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			wrong := m
+			wrong.Device = "MTL0"
+			if wrong.Validate() == nil {
+				t.Fatal("accepted Metal device in a Vulkan assignment")
+			}
+			wrong = m
+			wrong.ClassID = "amd-ryzen-ai-max-495"
+			wrong.HardwareClassID = "amd-ryzen-ai-max-395"
+			if wrong.Validate() == nil {
+				t.Fatal("accepted mismatched Halo classes")
+			}
+		})
+	}
+}
