@@ -275,8 +275,12 @@ func buildSetupPlan(ctx context.Context, p Plan, requested, wireguardMode string
 			digest := sha256.Sum256(canonical)
 			result.Platform.PackageStateSHA256 = hex.EncodeToString(digest[:])
 			result.Platform.ProtectedPackages = []PackageChange{}
+			profileID := ""
+			if result.Profile != nil {
+				profileID = result.Profile.ID
+			}
 			for name, version := range installed {
-				if protectedProfilePackage(result.Profile.ID, name) {
+				if protectedProfilePackage(profileID, name) {
 					result.Platform.ProtectedPackages = append(result.Platform.ProtectedPackages, PackageChange{name, version, version})
 				}
 			}
