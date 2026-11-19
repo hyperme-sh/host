@@ -537,18 +537,45 @@ if [ "$channel" = test ]; then
 fi
 
 upload_github() {
-  name=$1
-  file=$2
-  code=$(curl --connect-timeout 30 --max-time 600 -sS -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer ${GH_TOKEN}" \
-    -H "Content-Type: application/octet-stream" \
-    -H "Accept: application/vnd.github+json" \
-    -X POST --data-binary @"${file}" \
-    "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${gh_rel}/assets?name=${name}")
-  if [ "$code" != 201 ]; then
-    echo "hypermesh release: upload ${name} failed with HTTP ${code}" >&2
-    exit 1
-  fi
+  local name=$1 file=$2 code status attempt digest listed expected
+  expected=$(sha256sum "$file" | awk '{print $1}')
+  for attempt in 1 2 3; do
+    status=0
+    code=$(curl --connect-timeout 30 --max-time 600 -sS -o /dev/null -w '%{http_code}' \
+      -H "Authorization: Bearer ${GH_TOKEN}" \
+      -H "Content-Type: application/octet-stream" \
+      -H "Accept: application/vnd.github+json" \
+      -X POST --data-binary @"${file}" \
+      "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${gh_rel}/assets?name=${name}") || status=$?
+    if [ "$status" = 0 ] && [ "$code" = 201 ]; then
+      return 0
+    fi
+    case "${status}:${code}" in
+      0:408|0:429|0:422|0:5??|5:*|6:*|7:*|18:*|28:*|52:*|55:*|56:*) ;;
+      *) break ;;
+    esac
+
+    # An upload can commit before the acknowledgement is lost. Before another
+    # POST, establish whether the asset exists and whether its bytes match.
+    if ! listed=$(curl --retry 2 --retry-max-time 60 --connect-timeout 10 --max-time 20 \
+        -sS -o "${dist}/upload-assets.json" -w '%{http_code}' "${auth[@]}" \
+        "${api}/releases/${gh_rel}/assets?per_page=100") || [ "$listed" != 200 ]; then
+      echo "hypermesh release: cannot reconcile upload of ${name}" >&2
+      return 1
+    fi
+    digest=$(github_asset_digest "${dist}/upload-assets.json" "$name")
+    case "$digest" in
+      "sha $expected") return 0 ;;
+      absent) ;;
+      *) echo "hypermesh release: existing upload of ${name} does not match signed bytes" >&2; return 1 ;;
+    esac
+    if [ "$code" = 422 ] || [ "$attempt" = 3 ]; then
+      break
+    fi
+    sleep "$((attempt * 2))"
+  done
+  echo "hypermesh release: upload ${name} failed (curl ${status}, HTTP ${code})" >&2
+  return 1
 }
 
 # Permanent releases retain matching assets and repair interrupted uploads.
