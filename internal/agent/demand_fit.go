@@ -19,6 +19,8 @@ func demandModelBudget(profile hardware.Profile, backend string) int64 {
 		if profile.Backend == "hip" {
 			return profile.ModelBudgetBytes
 		}
+	case runtime.BackendLlamaCppVulkan:
+        return runtime.VulkanModelBudget(profile.Facts.AvailableBytes)
 	case runtime.BackendLlamaCppCPU:
 		// CPU is explicitly requested. Budget system RAM even if this host also
 		// has a GPU; never borrow a GPU budget or silently replace a GPU request.

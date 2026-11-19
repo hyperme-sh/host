@@ -77,9 +77,9 @@ func TestStubVulkanStillFailsOnROCmImage(t *testing.T) {
 		Kind:     api.KindLeaseStart,
 		DeviceID: testDevice,
 		LeaseID:  "lease-vk",
-		Backend:  "llama-cpp-vulkan",
+		Backend:  "unknown-backend",
 	})
-	if got.Passed || got.Reason != "This image does not run llama-cpp-vulkan." {
+	if got.Passed || got.Reason != "This image does not run unknown-backend." {
 		t.Fatalf("%+v", got)
 	}
 }

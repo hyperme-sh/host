@@ -213,17 +213,21 @@ func ggufBind(host string) string {
 // The image entrypoint is replaced so llama-server --alias is the lease
 // catalog id and LLAMA_ARG_JINJA / CTX_SIZE / TIMEOUT are set. See llama.go.
 func StartArgs(spec Spec, ref string) []string {
-	args := []string{
-		"run", "-d", "--runtime=nvidia",
+	return containerStartArgs(spec, ref, llamaServerCommand, "--runtime=nvidia")
+}
+
+func containerStartArgs(spec Spec, ref, command string, runtimeArgs ...string) []string {
+	args := append([]string{"run", "-d"}, runtimeArgs...)
+	args = append(args,
 		"-p", publishSpec(spec.HostPort, spec.BindAddress),
 		"-v", ggufBind(spec.GGUFPath),
-	}
+	)
 	args = append(args, JailArgs()...)
 	if name := ContainerName(spec.LeaseID); name != "hypermesh-" {
 		args = append(args, "--name", name)
 	}
 	args = append(args, llamaServerDockerOpts(spec)...)
-	args = append(args, ref, "-c", llamaServerCommand)
+	args = append(args, ref, "-c", command)
 	return args
 }
 
@@ -233,7 +237,11 @@ func StartArgs(spec Spec, ref string) []string {
 // A failed run removes a leftover Status=Created container so a
 // same-lease retry is not blocked on --name.
 func (n *NVIDIA) Start(ctx context.Context, spec Spec) (*Handle, error) {
-	if !n.cpu && spec.Runtime != "" && spec.Runtime != "nvidia" {
+	return n.start(ctx, spec, "")
+}
+
+func (n *NVIDIA) start(ctx context.Context, spec Spec, vulkanRender string) (*Handle, error) {
+	if vulkanRender == "" && !n.cpu && spec.Runtime != "" && spec.Runtime != "nvidia" {
 		return nil, ErrWrongRuntime
 	}
 	if strings.TrimSpace(spec.LeaseID) == "" {
@@ -246,7 +254,15 @@ func (n *NVIDIA) Start(ctx context.Context, spec Spec) (*Handle, error) {
 	if _, err := requireServeAlias(spec.CatalogID); err != nil {
 		return nil, err
 	}
-	if n.cpu {
+	if vulkanRender != "" {
+		if err := validateVulkanImage(ref); err != nil {
+			return nil, err
+		}
+		if err := RequireGGUFFile(spec.GGUFPath); err != nil {
+			return nil, err
+		}
+		spec.Backend = BackendLlamaCppVulkan
+	} else if n.cpu {
 		spec.Backend = BackendLlamaCppCPU
 	}
 	name := ContainerName(spec.LeaseID)
@@ -255,9 +271,14 @@ func (n *NVIDIA) Start(ctx context.Context, spec Spec) (*Handle, error) {
 			return nil, wrapDocker("pull", out, err)
 		}
 	}
-	args := StartArgs(spec, ref)
-	if n.cpu {
+	var args []string
+	switch {
+	case vulkanRender != "":
+		args = vulkanStartArgs(spec, ref, vulkanRender)
+	case n.cpu:
 		args = CPUStartArgs(spec, ref)
+	default:
+		args = StartArgs(spec, ref)
 	}
 	for _, a := range args {
 		if a == "--gpus" || strings.HasPrefix(a, "--gpus=") {

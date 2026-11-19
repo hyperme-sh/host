@@ -209,6 +209,8 @@ func (a *Agent) dockerRunnerFor(h *runtime.Handle) runtime.DockerRunner {
 		return v.DockerRun
 	case *runtime.HIP:
 		return v.DockerRun
+    case *runtime.Vulkan:
+        return v.DockerRun
 	default:
 		return a.dockerRun
 	}
