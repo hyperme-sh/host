@@ -7,10 +7,27 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+
+	"github.com/FyberLabs/hypermesh-host/internal/hardware"
+	hostruntime "github.com/FyberLabs/hypermesh-host/internal/runtime"
 )
 
 func probeResources(ctx context.Context, directory, mode string, allocation int64) (Resources, error) {
-	return probeResourcesWithRuntime(ctx, directory, mode, allocation, probeUMARuntime)
+	return probeResourcesWithRuntime(ctx, directory, mode, allocation, func(ctx context.Context) (*UMARuntime, error) {
+		profile := hardware.Detect(ctx)
+		if profile.Backend == "vulkan" && haloHardware(profile.Facts, profile.Facts.MemoryBytes) {
+			if allocation != 0 {
+				return nil, fmt.Errorf("use --uma-gib 0 for managed Halo Vulkan")
+			}
+			total, free := hostruntime.VulkanDeviceMemory()
+			snapshot := &UMARuntime{Backend: "vulkan", TotalBytes: total, FreeBytes: free}
+			if !validUMARuntime(snapshot) {
+				return nil, fmt.Errorf("cannot measure memory on a single usable AMD render device")
+			}
+			return snapshot, nil
+		}
+		return probeUMARuntime(ctx)
+	})
 }
 
 func probeResourcesWithRuntime(ctx context.Context, directory, mode string, allocation int64, runtimeProbe func(context.Context) (*UMARuntime, error)) (Resources, error) {

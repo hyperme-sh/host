@@ -106,22 +106,33 @@ func findVulkanRenderNode(sysRoot, devRoot string, isCharDevice func(string) boo
 // or VRAM headroom and available system memory. The limits can describe the
 // same physical RAM, so use the larger single pool rather than adding them.
 func VulkanModelBudget(available int64) int64 {
-	node, err := systemVulkanRenderNode()
-	if err != nil {
-		return 0
-	}
-	device := filepath.Join("/sys/class/drm", filepath.Base(node), "device")
-	memory := min(available, max(freeDRMMemory(device, "gtt"), freeDRMMemory(device, "vram")))
+	_, free := VulkanDeviceMemory()
+	memory := min(available, free)
 	return max(0, memory-max(memory/4, 2<<30))
 }
 
-func freeDRMMemory(device, pool string) int64 {
+// VulkanDeviceMemory reports the total and free bytes of the usable pool with
+// the most headroom. GTT and VRAM may refer to overlapping physical RAM.
+func VulkanDeviceMemory() (total, free int64) {
+	node, err := systemVulkanRenderNode()
+	if err != nil {
+		return 0, 0
+	}
+	device := filepath.Join("/sys/class/drm", filepath.Base(node), "device")
+	total, free = drmMemory(device, "gtt")
+	if vramTotal, vramFree := drmMemory(device, "vram"); vramFree > free {
+		return vramTotal, vramFree
+	}
+	return total, free
+}
+
+func drmMemory(device, pool string) (int64, int64) {
 	total, errTotal := readDRMMemory(device, pool+"_total")
 	used, errUsed := readDRMMemory(device, pool+"_used")
 	if errTotal != nil || errUsed != nil || used < 0 || used >= total {
-		return 0
+		return 0, 0
 	}
-	return total - used
+	return total, total - used
 }
 
 func readDRMMemory(device, field string) (int64, error) {

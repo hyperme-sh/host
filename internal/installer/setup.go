@@ -38,6 +38,8 @@ func setupProfiles() []SetupProfile {
 		{"debian-arm64-cpu", 1, "candidate; physical acceptance pending", "preserve installed vendor stack", append([]string{}, packages...), []string{"wireguard-go"}},
  {"ubuntu-arm64-cpu", 1, "candidate; physical acceptance pending", "preserve installed vendor stack", append([]string{}, packages...), []string{"wireguard-go"}},
  {"ubuntu-jetson-cuda", 3, "candidate; physical acceptance pending", "preserve installed vendor stack", append([]string{}, packages...), []string{"wireguard-go"}},
+		{"debian-amd-halo-vulkan", 1, "candidate", "preserve installed AMDGPU and Mesa", append([]string{}, packages...), []string{"wireguard-go"}},
+		{"ubuntu-amd-halo-vulkan", 1, "candidate", "preserve installed AMDGPU and Mesa", append([]string{}, packages...), []string{"wireguard-go"}},
 		{"ubuntu-amd-hip", 3, "candidate; physical acceptance pending", "preserve installed vendor stack", append([]string{}, packages...), []string{"wireguard-go"}},
 		{"ubuntu-discrete-cuda", 3, "candidate; physical acceptance pending", "preserve installed vendor stack", append([]string{}, packages...), []string{"wireguard-go"}},
 	}
@@ -191,6 +193,8 @@ func selectSetupProfile(p Plan, platform SetupPlatform, requested string) (*Setu
 	cpuSystem:=hardware.SystemID(f)
  if p.Resources.MemoryMode=="cpu" && p.Resources.Resources.CPU && arch=="arm64" && (cpuSystem=="radxa-rock-5"||cpuSystem=="radxa-orion-o6n"||cpuSystem=="renesas-rz-v2h") {
     id=platform.OS+"-arm64-cpu"
+ } else if haloSetup(p) {
+    id=platform.OS+"-amd-halo-vulkan"
  } else if platform.OS=="debian" {return nil,fmt.Errorf("Debian accelerator setup policies are not qualified")
  } else if p.Resources.Resources.UMA {
 		r := p.Resources.Resources.UMARuntime
@@ -294,6 +298,8 @@ func buildSetupPlan(ctx context.Context, p Plan, requested, wireguardMode string
 			switch result.Profile.ID {
 			case "ubuntu-jetson-cuda":
 				vendorKnown = vendorKnown || base == "nvidia-l4t-core"
+			case "debian-amd-halo-vulkan", "ubuntu-amd-halo-vulkan":
+				vendorKnown = vendorKnown || base == "mesa-vulkan-drivers"
 			case "ubuntu-amd-hip":
 				vendorKnown = vendorKnown || base == "hip-runtime-amd"
 			case "ubuntu-discrete-cuda":

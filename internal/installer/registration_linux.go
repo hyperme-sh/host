@@ -49,6 +49,9 @@ func newRegistration(p agentInstallPlan,issuer,dashboard,class string,fresh Plan
  // A candidate class is not certification. Until generic class admission is
  // supported by the plane, accept only a measured match for existing classes.
  if err:=registrationClass(class,fresh);err!=nil{return j,err}
+ if class == haloClass {
+  if err := validateHaloScope(p, issuer, dashboard, fresh); err != nil {return j,err}
+ }
  private,public,err:=tunnel.GenerateKeypair();if err!=nil{return j,fmt.Errorf("cannot generate host key")}
  id:=make([]byte,16);secret:=make([]byte,24)
  if _,err=rand.Read(id);err!=nil{return j,fmt.Errorf("cannot generate registration request")}
@@ -71,7 +74,7 @@ func newRegistration(p agentInstallPlan,issuer,dashboard,class string,fresh Plan
  report:=hostregistration.Hardware{Profile:p.Setup.Profile.ID,Architecture:normalizedSetupArch(h.Facts.Arch),
  CPU:cpu,GPU:gpu,SystemMemoryBytes:fresh.Resources.Resources.SystemBytes,ModelMemoryBytes:modelMemory}
  j=registrationJournal{Schema:1,PlanSHA256:p.SHA256,Issuer:issuer,Dashboard:dashboard,PrivateKey:private,DeviceSecret:credential,State:"prepared",
- Request:hostregistration.Request{RequestID:requestID,HostName:p.HostName,ClassID:class,Hardware:report,WGPublicKey:public,DeviceSecretHash:digestSetupBytes([]byte(credential)),CredentialPrefix:credential[7:15]}}
+ Request:hostregistration.Request{RequestID:requestID,HostName:p.HostName,ClassID:class,PauseSelling:class==haloClass,Hardware:report,WGPublicKey:public,DeviceSecretHash:digestSetupBytes([]byte(credential)),CredentialPrefix:credential[7:15]}}
  return j,j.Request.Validate()
 }
 func registrationClass(class string,p Plan)error {
@@ -79,6 +82,8 @@ func registrationClass(class string,p Plan)error {
  model:=strings.ToLower(f.Model)
  memory:=p.Resources.Resources.SystemBytes
  switch class {
+ case haloClass:
+  if haloSetup(p) {return nil}
  case "agx-large":
   if f.Tegra && p.Hardware.Backend=="cuda" && strings.Contains(model,"agx orin") && memory>=56*GiB && memory<=66*GiB{return nil}
  case "nx-volume":
@@ -89,7 +94,7 @@ func registrationClass(class string,p Plan)error {
 func validateRegistration(j registrationJournal,p agentInstallPlan,issuer,dashboard,class string)error {
  pub,err:=tunnel.PublicFromPrivate(j.PrivateKey)
  secret,secretErr:=base64.RawURLEncoding.DecodeString(strings.TrimPrefix(j.DeviceSecret,"hm_dev_"))
- if j.Schema!=1||j.PlanSHA256!=p.SHA256||j.Issuer!=issuer||j.Dashboard!=dashboard||j.Request.HostName!=p.HostName||j.Request.ClassID!=class||
+ if j.Schema!=1||j.PlanSHA256!=p.SHA256||j.Issuer!=issuer||j.Dashboard!=dashboard||j.Request.HostName!=p.HostName||j.Request.ClassID!=class||j.Request.PauseSelling!=(class==haloClass)||
  err!=nil||pub!=j.Request.WGPublicKey||!strings.HasPrefix(j.DeviceSecret,"hm_dev_")||secretErr!=nil||len(secret)!=24||
  "hm_dev_"+base64.RawURLEncoding.EncodeToString(secret)!=j.DeviceSecret||
  digestSetupBytes([]byte(j.DeviceSecret))!=j.Request.DeviceSecretHash||len(j.DeviceSecret)<15||j.DeviceSecret[7:15]!=j.Request.CredentialPrefix {
@@ -305,6 +310,7 @@ func RunRegisterAgent(ctx context.Context,args []string,out,diagnostic io.Writer
  if err:=flags.Parse(args);err!=nil{if err==flag.ErrHelp{return 0};return 2}
  if flags.NArg()!=0||*path==""||!setupDigestRE.MatchString(*approved)||validateEndpoint(*issuer)!=nil||!hostregistration.Origin(*dashboard)||*class==""{fmt.Fprintln(diagnostic,"require --plan, --approve-plan, --issuer, --dashboard-url and --class-id");return 2}
  *dashboard=strings.TrimRight(*dashboard,"/")
+ if *class == haloClass {fmt.Fprintln(diagnostic,"use install-halo-test for an isolated Halo TEST profile");return 2}
  if os.Geteuid()!=0{fmt.Fprintln(diagnostic,"register-agent requires root");return 1}
  var p agentInstallPlan
  raw,err:=readSetupRegular(*path,false)
