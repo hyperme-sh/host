@@ -296,11 +296,47 @@ func TestNativeVulkanEvidenceBindsBothHaloClasses(t *testing.T) {
 			r.OS, r.Arch, r.Device, r.Backend = m.OS, m.Arch, m.Device, "vulkan"
 			for i := range r.Samples {
 				raw := bytes.ReplaceAll(r.Samples[i].Raw, []byte("MTL0"), []byte("Vulkan0"))
-				r.Samples[i].Raw = bytes.ReplaceAll(raw, []byte("MTL,BLAS"), []byte("Vulkan,BLAS"))
+				raw = bytes.ReplaceAll(raw, []byte("MTL,BLAS"), []byte("Vulkan,BLAS"))
+				gpu := "AMD Radeon 8060S Graphics (RADV STRIX_HALO)"
+				if hardwareClass == "amd-ryzen-ai-max-495" {
+					gpu = "AMD Radeon 8065S (RADV STRIX_HALO)"
+				}
+				var rows []map[string]any
+				if err := json.Unmarshal(raw, &rows); err != nil {
+					t.Fatal(err)
+				}
+				rows[0]["gpu_info"] = gpu
+				var err error
+				r.Samples[i].Raw, err = json.Marshal(rows)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			e, err := nativeEvidence(r, m)
 			if err != nil || len(e.Samples) != 3 || e.Samples[0].Backend != "vulkan" || !e.CleanupComplete {
 				t.Fatalf("valid Vulkan samples refused: %v", err)
+			}
+			for i := range r.Samples {
+				original := append([]byte(nil), r.Samples[i].Raw...)
+				for _, gpu := range []string{"", "AMD Radeon 8060S", "AMD Radeon 8065S", "AMD Radeon 18060S (RADV STRIX_HALO)", "AMD Radeon 8060S 8065S (RADV STRIX_HALO)", "AMD Radeon 8060S (RADV STRIX_HALO)", "AMD Radeon 8065S (RADV STRIX_HALO)"} {
+					if hardwareClass == "amd-ryzen-ai-max-395" && gpu == "AMD Radeon 8060S (RADV STRIX_HALO)" || hardwareClass == "amd-ryzen-ai-max-495" && gpu == "AMD Radeon 8065S (RADV STRIX_HALO)" {
+						continue
+					}
+					var rows []map[string]any
+					if err := json.Unmarshal(original, &rows); err != nil {
+						t.Fatal(err)
+					}
+					rows[0]["gpu_info"] = gpu
+					var err error
+					r.Samples[i].Raw, err = json.Marshal(rows)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := nativeEvidence(r, m); err == nil {
+						t.Fatalf("accepted wrong GPU in sample %d: %q", i, gpu)
+					}
+				}
+				r.Samples[i].Raw = original
 			}
 			r.Samples[0].Raw = bytes.ReplaceAll(r.Samples[0].Raw, []byte("Vulkan,BLAS"), []byte("CUDA"))
 			if _, err := nativeEvidence(r, m); err == nil {

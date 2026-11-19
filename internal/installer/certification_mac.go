@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -353,6 +354,7 @@ func nativeEvidence(r certmeasure.Report, m hostregistration.NativeManifest) (ho
 			Layers    *int      `json:"n_gpu_layers"`
 			Device    string    `json:"devices"`
 			Backends  string    `json:"backends"`
+			GPU       string    `json:"gpu_info"`
 		}
 		if json.Unmarshal(s.Raw, &rows) != nil || len(rows) != 1 {
 			return e, fmt.Errorf("native raw context proof missing")
@@ -364,7 +366,7 @@ func nativeEvidence(r certmeasure.Report, m hostregistration.NativeManifest) (ho
 			backendMatches = false
 			for _, name := range strings.Split(reported, ",") {
 				if strings.TrimSpace(name) == "vulkan" {
-					backendMatches = true
+					backendMatches = nativeVulkanGPUMatches(m.HardwareClassID, v.GPU)
 					break
 				}
 			}
@@ -375,6 +377,26 @@ func nativeEvidence(r certmeasure.Report, m hostregistration.NativeManifest) (ho
 		e.Samples = append(e.Samples, hostregistration.NativeSample{CapturedAt: s.CapturedAt, ElapsedMS: s.ElapsedMS, AverageNS: v.Average, PromptTokens: 0, DepthTokens: *v.Depth, GeneratedTokens: 32, GPULayers: 99, Device: v.Device, Backend: backend})
 	}
 	return e, nil
+}
+
+var nativeGPUWord = regexp.MustCompile(`[a-z0-9_]+`)
+
+func nativeVulkanGPUMatches(class, gpu string) bool {
+	words := make(map[string]bool)
+	for _, word := range nativeGPUWord.FindAllString(strings.ToLower(gpu), -1) {
+		words[word] = true
+	}
+	if !words["strix_halo"] {
+		return false
+	}
+	switch class {
+	case "amd-ryzen-ai-max-395":
+		return words["8060s"] && !words["8065s"]
+	case "amd-ryzen-ai-max-495":
+		return words["8065s"] && !words["8060s"]
+	default:
+		return false
+	}
 }
 
 // Preserve absence separately from a malformed or unsafe existing file.
