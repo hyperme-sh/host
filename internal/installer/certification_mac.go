@@ -34,7 +34,17 @@ type nativeRemote interface {
 	PlanNativeCertification(context.Context, hostregistration.Request, string, string, string, string, string) (hostregistration.NativeRun, error)
 	ReportNativeCertification(context.Context, hostregistration.Request, string, string, hostregistration.NativeRun, hostregistration.NativeEvidence) (hostregistration.NativeRun, error)
 }
+type nativeInstallation struct {
+	journal       registrationJournal
+	plane, tenant string
+	check         func(context.Context) error
+}
+
 type nativeDeps struct {
+	installation func(context.Context, string, string) (nativeInstallation, error)
+	stateDir     string
+	lock         func(string) (func(), error)
+	backend      string
 	registration macRegistrationDeps
 	inventory    func(context.Context) (string, string, error)
 	remote       func(string, string) (nativeRemote, error)
@@ -43,12 +53,16 @@ type nativeDeps struct {
 
 func nativePlanDigest(p nativePlan) string { raw, _ := json.Marshal(p); return macDigest(raw) }
 
-func runMacNativeCertification(ctx context.Context, args []string, out, diagnostic io.Writer, planning bool, d nativeDeps) int {
+func runNativeCertification(ctx context.Context, args []string, out, diagnostic io.Writer, planning bool, d nativeDeps) int {
 	flags := flag.NewFlagSet("native-certification", flag.ContinueOnError)
 	flags.SetOutput(diagnostic)
 	path := flags.String("plan", "", "private native certification plan file (created by plan-certification)")
-	registration := flags.String("registration-plan-sha", "", "saved Mac registration plan digest; planning only")
+	registration := flags.String("registration-plan-sha", "", "saved installation plan digest; planning only")
 	firstReference := flags.Bool("first-reference", false, "plan native measurements for operator review before a class reference exists")
+	var agentPlan string
+	if d.installation != nil {
+		flags.StringVar(&agentPlan, "agent-plan", "", "original approved agent plan for a separately installed Halo TEST profile")
+	}
 	approved := flags.String("approve-plan", "", "reviewed native plan digest")
 	run := flags.Bool("run", false, "run the approved native workload and submit its measurements")
 	model := flags.String("model-file", "", "local pinned GGUF")
@@ -61,7 +75,7 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 		return 2
 	}
 	fail := func(err error) int { fmt.Fprintln(diagnostic, err); return 1 }
-	if (!planning && *firstReference) || flags.NArg() != 0 || !filepath.IsAbs(*path) || (planning && !macSHA.MatchString(*registration)) || (!planning && (!*run || !macSHA.MatchString(*approved))) {
+	if ((!planning || d.installation != nil) && *firstReference) || flags.NArg() != 0 || !filepath.IsAbs(*path) || (planning && !macSHA.MatchString(*registration)) || (!planning && (!*run || !macSHA.MatchString(*approved))) {
 		return fail(fmt.Errorf("require an absolute --plan; planning requires --registration-plan-sha; execution requires --approve-plan and --run"))
 	}
 	// Resolve only Darwin's fixed root-owned /var and /etc aliases.
@@ -69,8 +83,13 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 	if *artifacts != "" {
 		*artifacts = macPath("", *artifacts)
 	}
-	state := macPath(d.registration.root, macRegistrationState)
-	unlock, err := macLock(state)
+	state := d.stateDir
+	lock := d.lock
+	if d.installation == nil {
+		state = macPath(d.registration.root, macRegistrationState)
+		lock = macLock
+	}
+	unlock, err := lock(state)
 	if err != nil {
 		return fail(err)
 	}
@@ -102,45 +121,24 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 	if !planning && (p.Run == nil || nativePlanDigest(p) != *approved) {
 		return fail(fmt.Errorf("native plan digest differs"))
 	}
-	journalRaw, err := macRead(filepath.Join(state, "registration-"+p.RegistrationSHA+".json"), 0600, 2<<20)
+	load := d.installation
+	if load == nil {
+		load = func(ctx context.Context, digest, _ string) (nativeInstallation, error) {
+			return macNativeInstallation(ctx, d, state, digest)
+		}
+	}
+	installation, err := load(ctx, p.RegistrationSHA, agentPlan)
 	if err != nil {
 		return fail(err)
 	}
-	var j registrationJournal
-	if err = macDecode(journalRaw, &j); err != nil {
-		return fail(err)
-	}
-	env, err := macRead(macPath(d.registration.root, "/etc/hypermesh/agent.env"), 0600, 2<<20)
-	if err != nil {
-		return fail(err)
-	}
-	config, err := macConfig(env, j.Issuer, j.Dashboard)
-	if err != nil {
-		return fail(err)
-	}
-	if macValidate(j, p.RegistrationSHA, config) != nil || j.State != "registered-inactive" {
-		return fail(fmt.Errorf("native certification requires the current inactive Mac registration"))
-	}
+	j := installation.journal
 	check := func() error {
-		current, _, e := macSnapshot(ctx, d.registration, config)
-		if e != nil {
-			return e
+		if err := installation.check(ctx); err != nil {
+			return err
 		}
-		if current != p.RegistrationSHA {
-			return fmt.Errorf("installed Mac configuration differs")
-		}
-		if e = macIdentity(d.registration, j, false); e != nil {
-			return e
-		}
-		if e = macServices(ctx, d.registration, false, false); e != nil {
-			return e
-		}
-		if _, e = os.Lstat(macPath(d.registration.root, "/var/lib/hypermesh/lease.json")); !os.IsNotExist(e) {
-			return fmt.Errorf("native certification requires no local lease")
-		}
-		environment, hardware, e := d.inventory(ctx)
-		if e != nil {
-			return e
+		environment, hardware, err := d.inventory(ctx)
+		if err != nil {
+			return err
 		}
 		if environment != p.Environment || hardware != p.Hardware {
 			return fmt.Errorf("native inventory changed; plan a new run")
@@ -150,7 +148,7 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 	if err = check(); err != nil {
 		return fail(err)
 	}
-	client, err := d.remote(config.ControlPlane, config.Tenant)
+	client, err := d.remote(installation.plane, installation.tenant)
 	if err != nil {
 		return fail(err)
 	}
@@ -194,7 +192,7 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 		return printNativePlan(out, *path, p)
 	}
 	m := p.Run.Manifest
-	if (m.Purpose == hostregistration.NativeReferencePurpose) != p.FirstReference || m.Validate() != nil || m.CollectorCommit != buildinfo.Current() || m.EnvironmentHash != p.Environment || m.Hardware != p.Hardware || p.Run.DeviceID != j.DeviceID || p.Run.RequestID != j.Request.RequestID || p.Run.TenantID != config.Tenant {
+	if (m.Purpose == hostregistration.NativeReferencePurpose) != p.FirstReference || m.Validate() != nil || m.CollectorCommit != buildinfo.Current() || m.EnvironmentHash != p.Environment || m.Hardware != p.Hardware || p.Run.DeviceID != j.DeviceID || p.Run.RequestID != j.Request.RequestID || p.Run.TenantID != installation.tenant {
 		return fail(fmt.Errorf("native workload or installation binding differs"))
 	}
 	evidencePath := *path + ".evidence.json"
@@ -220,8 +218,12 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 		if e = trustedNativeRuntime(*binary, d.registration.root); e != nil {
 			return fail(e)
 		}
+		backend, stateDir := d.backend, d.stateDir
+		if backend == "" {
+			backend, stateDir = "metal", macPath(d.registration.root, "/var/lib/hypermesh")
+		}
 		var output bytes.Buffer
-		code := d.measure(ctx, []string{"--model-file", *model, "--model-sha256", strings.TrimPrefix(m.FileHash, "sha256:"), "--runtime-file", *binary, "--runtime-sha256", m.RuntimeSHA256, "--backend", "metal", "--device", m.Device, "--samples", "3", "--context-tokens", fmt.Sprint(m.ContextTokens), "--generated-tokens", "32", "--artifact-dir", *artifacts, "--state-dir", macPath(d.registration.root, "/var/lib/hypermesh")}, &output, diagnostic)
+		code := d.measure(ctx, []string{"--model-file", *model, "--model-sha256", strings.TrimPrefix(m.FileHash, "sha256:"), "--runtime-file", *binary, "--runtime-sha256", m.RuntimeSHA256, "--backend", backend, "--device", m.Device, "--samples", "3", "--context-tokens", fmt.Sprint(m.ContextTokens), "--generated-tokens", "32", "--artifact-dir", *artifacts, "--state-dir", stateDir}, &output, diagnostic)
 		if code != 0 {
 			return fail(fmt.Errorf("native measurement failed; complete report retained in the artifact directory"))
 		}
@@ -284,6 +286,48 @@ func runMacNativeCertification(ctx context.Context, args []string, out, diagnost
 	}
 	return 0
 }
+func macNativeInstallation(ctx context.Context, d nativeDeps, state, registrationSHA string) (nativeInstallation, error) {
+	journalRaw, err := macRead(filepath.Join(state, "registration-"+registrationSHA+".json"), 0600, 2<<20)
+	if err != nil {
+		return nativeInstallation{}, err
+	}
+	var j registrationJournal
+	if err = macDecode(journalRaw, &j); err != nil {
+		return nativeInstallation{}, err
+	}
+	env, err := macRead(macPath(d.registration.root, "/etc/hypermesh/agent.env"), 0600, 2<<20)
+	if err != nil {
+		return nativeInstallation{}, err
+	}
+	config, err := macConfig(env, j.Issuer, j.Dashboard)
+	if err != nil {
+		return nativeInstallation{}, err
+	}
+	if macValidate(j, registrationSHA, config) != nil || j.State != "registered-inactive" {
+		return nativeInstallation{}, fmt.Errorf("native certification requires the current inactive Mac registration")
+	}
+	check := func(ctx context.Context) error {
+		current, _, e := macSnapshot(ctx, d.registration, config)
+		if e != nil {
+			return e
+		}
+		if current != registrationSHA {
+			return fmt.Errorf("installed Mac configuration differs")
+		}
+		if e = macIdentity(d.registration, j, false); e != nil {
+			return e
+		}
+		if e = macServices(ctx, d.registration, false, false); e != nil {
+			return e
+		}
+		if _, e = os.Lstat(macPath(d.registration.root, "/var/lib/hypermesh/lease.json")); !os.IsNotExist(e) {
+			return fmt.Errorf("native certification requires no local lease")
+		}
+		return nil
+	}
+	return nativeInstallation{journal: j, plane: config.ControlPlane, tenant: config.Tenant, check: check}, nil
+}
+
 func printNativePlan(out io.Writer, path string, p nativePlan) int {
 	if json.NewEncoder(out).Encode(map[string]any{"plan": path, "plan_sha256": nativePlanDigest(p), "run": p.Run}) != nil {
 		return 1
@@ -291,8 +335,12 @@ func printNativePlan(out io.Writer, path string, p nativePlan) int {
 	return 0
 }
 func nativeEvidence(r certmeasure.Report, m hostregistration.NativeManifest) (hostregistration.NativeEvidence, error) {
+	backend := "metal"
+	if m.Protocol == hostregistration.NativeVulkanProtocol {
+		backend = "vulkan"
+	}
 	e := hostregistration.NativeEvidence{EnvironmentHash: r.EnvironmentHash, Hardware: r.Hardware, FileHash: "sha256:" + r.ModelSHA256, RuntimeSHA256: r.RuntimeSHA256, CollectorCommit: r.CollectorCommit, OS: r.OS, Arch: r.Arch, StartedAt: r.StartedAt, CompletedAt: r.CompletedAt, CleanupComplete: true, Samples: []hostregistration.NativeSample{}}
-	if m.Validate() != nil || r.Schema != "hypermesh-certification-measurements-v1" || r.MeasurementState != "passed" || r.FailureCode != "" || r.CertificationState != "not_evaluated" || r.PhysicalAcceptance || r.Backend != "metal" || r.Device != m.Device || r.RuntimeImage != "" || r.OS != "darwin" || r.Arch != "arm64" || r.EnvironmentHash != m.EnvironmentHash || r.Hardware != m.Hardware || e.FileHash != m.FileHash || r.RuntimeSHA256 != m.RuntimeSHA256 || r.CollectorCommit != m.CollectorCommit || r.ContextTokens != m.ContextTokens || r.GeneratedTokens != 32 || len(r.Samples) != 3 || !r.CompletedAt.After(r.StartedAt) {
+	if m.Validate() != nil || r.Schema != "hypermesh-certification-measurements-v1" || r.MeasurementState != "passed" || r.FailureCode != "" || r.CertificationState != "not_evaluated" || r.PhysicalAcceptance || r.Backend != backend || r.Device != m.Device || r.RuntimeImage != "" || r.OS != m.OS || r.Arch != m.Arch || r.EnvironmentHash != m.EnvironmentHash || r.Hardware != m.Hardware || e.FileHash != m.FileHash || r.RuntimeSHA256 != m.RuntimeSHA256 || r.CollectorCommit != m.CollectorCommit || r.ContextTokens != m.ContextTokens || r.GeneratedTokens != 32 || len(r.Samples) != 3 || !r.CompletedAt.After(r.StartedAt) {
 		return e, fmt.Errorf("native report differs from the approved protocol, pins or inventory")
 	}
 	for _, s := range r.Samples {
@@ -310,10 +358,21 @@ func nativeEvidence(r certmeasure.Report, m hostregistration.NativeManifest) (ho
 			return e, fmt.Errorf("native raw context proof missing")
 		}
 		v := rows[0]
-		if v.Prompt == nil || *v.Prompt != 0 || v.Depth == nil || *v.Depth != m.ContextTokens-32 || v.Generated == nil || *v.Generated != 32 || v.Layers == nil || *v.Layers != 99 || v.Device != m.Device || !(strings.Contains(strings.ToLower(v.Backends), "mtl") || strings.Contains(strings.ToLower(v.Backends), "metal")) || v.Average <= 0 || math.IsNaN(v.Average) || math.IsInf(v.Average, 0) || len(v.Samples) != 1 || v.Samples[0] != v.Average || math.Abs(s.TokensPerSecond-32e9/v.Average) > 1e-6 {
-			return e, fmt.Errorf("native raw sample differs from requested Metal depth workload")
+		reported := strings.ToLower(v.Backends)
+		backendMatches := strings.Contains(reported, "mtl") || strings.Contains(reported, "metal")
+		if backend == "vulkan" {
+			backendMatches = false
+			for _, name := range strings.Split(reported, ",") {
+				if strings.TrimSpace(name) == "vulkan" {
+					backendMatches = true
+					break
+				}
+			}
 		}
-		e.Samples = append(e.Samples, hostregistration.NativeSample{CapturedAt: s.CapturedAt, ElapsedMS: s.ElapsedMS, AverageNS: v.Average, PromptTokens: 0, DepthTokens: *v.Depth, GeneratedTokens: 32, GPULayers: 99, Device: v.Device, Backend: "metal"})
+		if v.Prompt == nil || *v.Prompt != 0 || v.Depth == nil || *v.Depth != m.ContextTokens-32 || v.Generated == nil || *v.Generated != 32 || v.Layers == nil || *v.Layers != 99 || v.Device != m.Device || !backendMatches || v.Average <= 0 || math.IsNaN(v.Average) || math.IsInf(v.Average, 0) || len(v.Samples) != 1 || v.Samples[0] != v.Average || math.Abs(s.TokensPerSecond-32e9/v.Average) > 1e-6 {
+			return e, fmt.Errorf("native raw sample differs from requested native depth workload")
+		}
+		e.Samples = append(e.Samples, hostregistration.NativeSample{CapturedAt: s.CapturedAt, ElapsedMS: s.ElapsedMS, AverageNS: v.Average, PromptTokens: 0, DepthTokens: *v.Depth, GeneratedTokens: 32, GPULayers: 99, Device: v.Device, Backend: backend})
 	}
 	return e, nil
 }
