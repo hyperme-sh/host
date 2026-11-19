@@ -82,6 +82,9 @@ func validateSetupApprovalPolicy(p SetupPlan, approved string, installed bool) e
 		return fmt.Errorf("plan lacks valid preflight inputs; regenerate it")
 	}
 	if p.WireGuardMode!="kernel" && p.WireGuardMode!="userspace" { return fmt.Errorf("invalid WireGuard mode") }
+	if haloSetup(p.Preflight) && (p.HeadlessRequested || p.WireGuardMode!="kernel") {
+		return fmt.Errorf("Halo TEST setup requires kernel WireGuard and preserves the current boot target")
+	}
 	profile,err:=selectSetupProfile(p.Preflight,p.Platform,p.Profile.ID)
 	if err!=nil { return err }
 	if p.WireGuardMode=="userspace" {
@@ -192,7 +195,12 @@ func validateSetupHostPackages(ctx context.Context,p SetupPlan,deps setupApplyDe
 	if err!=nil {return nil,"",err}
 	if len(remaining)>0 {
 		args:=[]string{"--simulate","--no-install-recommends","--no-remove","install"}
-		for _,pkg:=range remaining {args=append(args,pkg.Name+"="+pkg.To)}
+		for _,pkg:=range remaining {
+			if haloSetup(p.Preflight) && packageBase(pkg.Name)=="docker.io" {
+				if err=dockerServiceAbsent(ctx,deps.Source);err!=nil{return nil,"",err}
+			}
+			args=append(args,pkg.Name+"="+pkg.To)
+		}
 		raw,err=deps.Source.output(ctx,"apt-get",args...)
 		if err!=nil {return nil,"",fmt.Errorf("approved package versions cannot be resolved; regenerate the plan")}
 		resolved,err:=parseSetupSimulation(string(raw),installed)

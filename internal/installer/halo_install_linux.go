@@ -28,11 +28,7 @@ const (
 
 func validateHaloScope(p agentInstallPlan, issuer, dashboard string, fresh Plan) error {
 	network, _ := installationNetwork("test")
-	processor := fresh.Hardware.Facts.Processor
-	alias := strings.ToLower(p.HostName)
-	matches := alias == "halo395-1" && halo395Processor.MatchString(processor) ||
-		alias == "halo495-1" && halo495Processor.MatchString(processor)
-	if !matches || !haloSetup(fresh) || p.ControlPlane != network.Plane || issuer != network.Issuer ||
+	if !haloAliasMatches(p.HostName, fresh.Hardware.Facts.Processor) || !haloSetup(fresh) || p.ControlPlane != network.Plane || issuer != network.Issuer ||
 		dashboard != network.Dashboard || p.Channel != "test" || p.Setup.HeadlessRequested ||
 		p.Setup.ReadinessURL != network.Plane+"/api/v1/hypermesh/public/host-installation" ||
 		p.Setup.WireGuardMode != "kernel" || p.Setup.Preflight.Resources.ModelDirectory != haloState+"/models" {
@@ -109,17 +105,29 @@ func RunInstallHaloTest(ctx context.Context, args []string, out, diagnostic io.W
 	flags.SetOutput(diagnostic)
 	plan := flags.String("plan", "", "reviewed signed agent plan for the TEST profile")
 	digest := flags.String("approve-plan", "", "exact agent plan SHA256")
+	bootstrap := flags.String("bootstrap-info", "", "private signed-bootstrap metadata file used to prepare or resume setup")
+	alias := flags.String("host-name", "", "canonical Halo alias for bootstrap setup")
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
 		}
 		return 2
 	}
-	if flags.NArg() != 0 || *plan == "" || !setupDigestRE.MatchString(*digest) || os.Geteuid() != 0 {
-		fmt.Fprintln(diagnostic, "require root, --plan and --approve-plan")
+	if flags.NArg() != 0 || os.Geteuid() != 0 {
+		fmt.Fprintln(diagnostic, "Halo TEST installation requires root and named arguments")
 		return 2
 	}
-	if err := installHaloTest(ctx, *plan, *digest, out, diagnostic); err != nil {
+	var err error
+	switch {
+	case *bootstrap != "" && *plan == "" && *digest == "" && *alias != "":
+		err = setupHaloTest(ctx, *bootstrap, *alias, out, diagnostic)
+	case *bootstrap == "" && *alias == "" && *plan != "" && setupDigestRE.MatchString(*digest):
+		err = installHaloTest(ctx, *plan, *digest, out, diagnostic)
+	default:
+		fmt.Fprintln(diagnostic, "use --bootstrap-info with --host-name, or --plan with --approve-plan")
+		return 2
+	}
+	if err != nil {
 		fmt.Fprintln(diagnostic, err)
 		return 1
 	}

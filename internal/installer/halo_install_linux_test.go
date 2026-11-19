@@ -27,7 +27,7 @@ func TestHaloNativeScope(t *testing.T) {
 			r := Resources{SystemBytes: tc.memory * GiB, AvailableSystemBytes: 40 * GiB, DiskFreeBytes: 64 * GiB,
 				UMA: true, UMARuntime: &UMARuntime{Backend: "vulkan", FreeBytes: 40 * GiB, TotalBytes: 64 * GiB}}
 			fresh := Plan{Hardware: hardware.Recommend(facts), Resources: ResourceReport{MemoryMode: haloMemoryMode, Resources: r, ModelDirectory: haloState + "/models"}}
-			for _, os := range []struct{ id, version string }{{"ubuntu", "24.04"}, {"debian", "13"}} {
+			for _, os := range []struct{ id, version string }{{"ubuntu", "24.04"}, {"ubuntu", "26.10"}, {"debian", "13"}} {
 				profile, err := selectSetupProfile(fresh, SetupPlatform{OS: os.id, Version: os.version}, "auto")
 				if err != nil || profile.ID != os.id+"-amd-halo-vulkan" {
 					t.Fatalf("setup profile = %v, %v", profile, err)
@@ -75,6 +75,9 @@ func TestHaloNativeScope(t *testing.T) {
 			if haloSetup(fresh) {
 				t.Error("allowed below-minimum OS-visible RAM")
 			}
+			if _, err := selectSetupProfile(fresh, SetupPlatform{OS: "ubuntu", Version: "26.10"}, "auto"); err == nil {
+				t.Error("allowed Ubuntu 26.10 outside the Halo Vulkan profile")
+			}
 		})
 	}
 }
@@ -99,5 +102,55 @@ func TestHaloVulkanPlanWithROCmInstalled(t *testing.T) {
 	var plan Plan
 	if err := json.Unmarshal(out.Bytes(), &plan); err != nil || code != 0 || !haloSetup(plan) {
 		t.Fatalf("Halo Vulkan plan failed: code=%d err=%v blockers=%v %s", code, err, plan.Blockers, diagnostics.String())
+	}
+}
+
+func TestHaloSetupPlansDockerAndWireGuard(t *testing.T) {
+	p, source := setupFixture()
+	p.Hardware = hardware.Recommend(hardware.Facts{
+		Arch: "amd64", Processor: "AMD Ryzen AI Max+ PRO 495", Vulkan: true,
+	})
+	r := &p.Resources.Resources
+	r.SystemBytes, r.UMAAllocationBytes = 192*GiB, 0
+	r.UMARuntime.Backend = "vulkan"
+	p.Resources.MemoryMode = haloMemoryMode
+	p.Resources.Admission = CheckResources(*r)
+	existing := "mesa-vulkan-drivers:amd64\t26.0\tii \n" +
+		"iproute2\t1\tii \niputils-ping\t1\tii \nca-certificates\t1\tii \ngnupg\t1\tii \npython3\t1\tii \n"
+	serviceState := "not-found"
+	var simulations int
+	source.Output = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		switch name {
+		case "systemctl":
+			if args[0] == "show" {
+				return []byte(serviceState), nil
+			}
+			return []byte("graphical.target"), nil
+		case "dpkg-query":
+			return []byte(existing), nil
+		case "apt-cache":
+			return []byte("Candidate: 1\n"), nil
+		case "apt-get":
+			simulations++
+			return []byte("Inst containerd (1 Ubuntu [amd64])\nInst docker.io (1 Ubuntu [amd64])\n" +
+				"Inst wireguard-tools (1 Ubuntu [amd64])\nConf containerd (1 Ubuntu [amd64])\n" +
+				"Conf docker.io (1 Ubuntu [amd64])\nConf wireguard-tools (1 Ubuntu [amd64])\n"), nil
+		default:
+			t.Fatalf("unexpected setup command %s", name)
+			return nil, nil
+		}
+	}
+	plan := buildSetupPlan(context.Background(), p, "auto", "kernel", false, source)
+	if !plan.Reviewable || len(plan.Packages) != 3 || len(plan.Changes) != 1 || simulations != 2 {
+		t.Fatalf("missing pinned Halo prerequisite transaction: %+v", plan)
+	}
+	for _, value := range []string{"docker.io=1", "containerd=1", "wireguard-tools=1"} {
+		if !strings.Contains(strings.Join(plan.Changes[0].Argv, " "), value) {
+			t.Fatalf("setup did not pin %s", value)
+		}
+	}
+	serviceState = "loaded"
+	if buildSetupPlan(context.Background(), p, "auto", "kernel", false, source).Reviewable {
+		t.Fatal("setup accepted an unmanaged Docker service")
 	}
 }
