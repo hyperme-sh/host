@@ -62,3 +62,49 @@ func TestNativeCertificationResponseBinding(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeFirstReferencePlanBinding(t *testing.T) {
+	for _, purpose := range []string{NativeReferencePurpose, nativeCertificatePurpose} {
+		t.Run(purpose, func(t *testing.T) {
+			r := fixture(t)
+			r.ClassID = "darwin-arm64-lab"
+			id, _ := NewRunID()
+			manifest := NativeManifest{
+				InventoryEpoch: time.Now().UTC().Format(time.RFC3339Nano), SuiteID: "pack-v1",
+				CatalogID: "metal-model", ClassID: r.ClassID, Purpose: purpose, Protocol: NativeMetalProtocol,
+				FileHash: "sha256:" + strings.Repeat("a", 64), RuntimeSHA256: strings.Repeat("b", 64),
+				CollectorCommit: strings.Repeat("d", 40), EnvironmentHash: "sha256:" + strings.Repeat("e", 64),
+				Hardware: strings.Repeat("f", 64), Device: "MTL0", OS: "darwin", Arch: "arm64",
+				Samples: 3, GeneratedTokens: 32, ContextTokens: 4096, SizeBytes: 3,
+			}
+			if purpose == nativeCertificatePurpose {
+				manifest.DecodeTokS = 40
+			}
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				var body struct {
+					FirstReference bool   `json:"first_reference"`
+					Nonce          string `json:"nonce"`
+				}
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil || !body.FirstReference || !strings.HasSuffix(req.URL.Path, "/plan") {
+					t.Error("first-reference planning request omitted its purpose")
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				json.NewEncoder(w).Encode(NativeRun{
+					ProtocolVersion: 1, Nonce: body.Nonce, RunID: id, TenantID: testTenant,
+					DeviceID: r.RequestID, RequestID: r.RequestID, Manifest: manifest,
+					ManifestSHA256: strings.Repeat("c", 64), State: "planned",
+					ExpiresAt: time.Now().Add(time.Hour), SellingAllowed: flagValue(false),
+				})
+			}))
+			defer server.Close()
+			client, _ := New(server.URL, testTenant)
+			client.http = server.Client()
+			_, err := client.PlanNativeReference(context.Background(), r, r.RequestID,
+				"hm_dev_"+strings.Repeat("s", 32), id, manifest.EnvironmentHash, manifest.Hardware)
+			if (err == nil) != (purpose == NativeReferencePurpose) {
+				t.Fatalf("purpose %s: %v", purpose, err)
+			}
+		})
+	}
+}

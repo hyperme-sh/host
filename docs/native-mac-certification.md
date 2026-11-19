@@ -65,3 +65,13 @@ renewal. No sustained-performance, tunnel, memory-protection or hardware-attesta
 claim follows from this certificate. CLI/agent builds and operator policy must be
 qualified and deployed separately; no release or deployment is performed by this
 change.
+
+## Collect the first class reference
+
+When the TEST catalog and AIuditor suite exist and the class has no reference,
+use `plan-certification --first-reference` with the normal registration digest
+and a new plan file. Execute that plan with `certify-agent --approve-plan` and
+the same local model and runtime options described above. This records a
+candidate in **Network administration → Benchmark review**. A program operator
+reviews and publishes the candidate. Then create a separate certification plan
+without `--first-reference` and collect fresh samples for certificate evaluation.
