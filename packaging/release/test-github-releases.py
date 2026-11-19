@@ -22,6 +22,7 @@ def fake_curl(args):
     url = urlsplit(args[-1])
     path = url.path.split("/repos/owner/host/")[-1]
     method = opt("-X", "GET")
+    transport_failure = 0
     state["calls"].append([method, path])
     code, body = 404, {}
     fail = state.get("fail")
@@ -64,7 +65,15 @@ def fake_curl(args):
             elif method == "POST":
                 name = parse_qs(url.query)["name"][0]
                 data = Path(opt("--data-binary")[1:]).read_bytes()
-                if any(a["name"] == name for a in rel["assets"]):
+                timeout = state.get("timeout")
+                if timeout and timeout[0] == name:
+                    del state["timeout"]
+                    transport_failure = 28
+                    if timeout[1]:
+                        rel["assets"].append({"name": name, "id": len(rel["assets"]) + 1,
+                                              "digest": "sha256:" + hashlib.sha256(data).hexdigest()})
+                    code = 0
+                elif any(a["name"] == name for a in rel["assets"]):
                     code = 422
                 else:
                     rel["assets"].append({"name": name, "id": len(rel["assets"]) + 1,
@@ -72,7 +81,9 @@ def fake_curl(args):
                     code = 201
     state_path.write_text(json.dumps(state))
     Path(opt("-o")).write_text(json.dumps(body))
-    print(code, end="")
+    print(f"{code:03d}", end="")
+    if transport_failure:
+        raise SystemExit(transport_failure)
 
 
 class GithubReleaseTests(unittest.TestCase):
@@ -88,6 +99,9 @@ class GithubReleaseTests(unittest.TestCase):
         curl.write_text("#!/bin/sh\nexec " + shlex.quote(sys.executable) + " " +
                         shlex.quote(str(Path(__file__).resolve())) + ' --fake-curl "$@"\n')
         curl.chmod(0o755)
+        sleep = self.root / "sleep"
+        sleep.write_text("#!/bin/sh\nexit 0\n")
+        sleep.chmod(0o755)
         for name in ("release.json", "checksums.txt", "checksums.txt.sig", "agent"):
             (self.dist / name).write_text(name + ": signed bytes")
 
@@ -168,6 +182,20 @@ class GithubReleaseTests(unittest.TestCase):
         self.write(state)
         self.publish(124, "b" * 40)
         self.assertEqual(self.read()["tags"]["test"], "b" * 40)
+
+    def test_timed_out_asset_is_reconciled_before_retry(self):
+        for committed in (False, True):
+            with self.subTest(committed=committed):
+                self.write({"tags": {}, "releases": {}, "calls": [], "next": 0,
+                            "timeout": ["checksums.txt.sig", committed]})
+                tag = self.publish()
+                state = self.read()
+                archive = state["releases"][tag]
+                self.assertEqual(len(archive["assets"]), 4)
+                self.assertEqual(archive["assets"], state["releases"]["test"]["assets"])
+                path = f"releases/{archive['id']}/assets"
+                self.assertEqual(state["calls"].count(["GET", path]), 1)
+                self.assertEqual(state["calls"].count(["POST", path]), 4 if committed else 5)
 
     def test_api_errors_are_not_absence(self):
         for path in ("git/ref/tags/test-123-aaaaaaaaaaaa", "releases/tags/test-123-aaaaaaaaaaaa",
