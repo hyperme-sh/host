@@ -142,6 +142,9 @@ sudo hypermesh-host certify-agent --halo-test \
   --artifact-dir /var/lib/hypermesh-halo-test/certification-artifacts
 ```
 
+For a profile installed in separate stages, pass `--agent-plan /absolute/path/to/agent.json`
+to both commands using the original approved agent plan.
+
 The runtime must be a root-owned executable under root-owned, non-writable
 ancestors. If the upload response is lost, retry the approved plan using its
 saved evidence. The command leaves local services inactive and selling paused.

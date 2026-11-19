@@ -41,7 +41,7 @@ type nativeInstallation struct {
 }
 
 type nativeDeps struct {
-	installation func(context.Context, string) (nativeInstallation, error)
+	installation func(context.Context, string, string) (nativeInstallation, error)
 	stateDir     string
 	lock         func(string) (func(), error)
 	backend      string
@@ -59,6 +59,10 @@ func runNativeCertification(ctx context.Context, args []string, out, diagnostic 
 	path := flags.String("plan", "", "private native certification plan file (created by plan-certification)")
 	registration := flags.String("registration-plan-sha", "", "saved installation plan digest; planning only")
 	firstReference := flags.Bool("first-reference", false, "plan native measurements for operator review before a class reference exists")
+	var agentPlan string
+	if d.installation != nil {
+		flags.StringVar(&agentPlan, "agent-plan", "", "original approved agent plan for a separately installed Halo TEST profile")
+	}
 	approved := flags.String("approve-plan", "", "reviewed native plan digest")
 	run := flags.Bool("run", false, "run the approved native workload and submit its measurements")
 	model := flags.String("model-file", "", "local pinned GGUF")
@@ -119,11 +123,11 @@ func runNativeCertification(ctx context.Context, args []string, out, diagnostic 
 	}
 	load := d.installation
 	if load == nil {
-		load = func(ctx context.Context, digest string) (nativeInstallation, error) {
+		load = func(ctx context.Context, digest, _ string) (nativeInstallation, error) {
 			return macNativeInstallation(ctx, d, state, digest)
 		}
 	}
-	installation, err := load(ctx, p.RegistrationSHA)
+	installation, err := load(ctx, p.RegistrationSHA, agentPlan)
 	if err != nil {
 		return fail(err)
 	}

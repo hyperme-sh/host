@@ -50,16 +50,33 @@ func runHaloNativeCertification(ctx context.Context, args []string, out, diagnos
 	})
 }
 
-func haloNativeInstallation(ctx context.Context, digest string) (nativeInstallation, error) {
-	if err := secureSetupDirectory(filepath.Join(haloState, "provision"), false); err != nil {
-		return nativeInstallation{}, err
-	}
+func readHaloNativePlan(path, digest string) (agentInstallPlan, error) {
 	var plan agentInstallPlan
-	if err := guidedRead(filepath.Join(haloState, "provision", "agent.json"), &plan, true); err != nil {
-		return nativeInstallation{}, err
+	if path == "" {
+		directory := filepath.Join(haloState, "provision")
+		if err := secureSetupDirectory(directory, false); err != nil {
+			return plan, err
+		}
+		path = filepath.Join(directory, "agent.json")
+	}
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return plan, fmt.Errorf("Halo agent plan requires a canonical absolute path")
+	}
+	// Separately installed plans can be operator-readable. Their contents must
+	// still match both the approved digest and the private registration journal.
+	if err := guidedRead(path, &plan, false); err != nil {
+		return plan, err
 	}
 	if plan.SHA256 != digest || agentPlanDigest(plan) != digest {
-		return nativeInstallation{}, fmt.Errorf("installed Halo plan differs from the approved digest")
+		return plan, fmt.Errorf("installed Halo plan differs from the approved digest")
+	}
+	return plan, nil
+}
+
+func haloNativeInstallation(_ context.Context, digest, agentPlanPath string) (nativeInstallation, error) {
+	plan, err := readHaloNativePlan(agentPlanPath, digest)
+	if err != nil {
+		return nativeInstallation{}, err
 	}
 	var journal registrationJournal
 	if err := guidedRead(filepath.Join(haloState, "registration.json"), &journal, true); err != nil {

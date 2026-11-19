@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -42,7 +43,7 @@ type NativeManifest struct {
 }
 
 func haloNativeClass(name string) string {
-	switch name {
+	switch strings.ToLower(name) {
 	case "halo395-1":
 		return "amd-ryzen-ai-max-395"
 	case "halo495-1":

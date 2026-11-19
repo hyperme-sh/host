@@ -110,7 +110,7 @@ func TestNativeFirstReferencePlanBinding(t *testing.T) {
 }
 
 func TestNativeVulkanManifestBindsHardwareClassAndDevice(t *testing.T) {
-	for _, alias := range []string{"halo395-1", "halo495-1"} {
+	for _, alias := range []string{"halo395-1", "halo495-1", "Halo395-1", "HALO495-1"} {
 		t.Run(alias, func(t *testing.T) {
 			m := NativeManifest{
 				InventoryEpoch: time.Now().UTC().Format(time.RFC3339Nano), SuiteID: "pack-v1",
