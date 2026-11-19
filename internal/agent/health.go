@@ -396,7 +396,11 @@ func (a *Agent) tunnelMetricsHost() string {
 	if a.ifaceAddr != nil {
 		ip = a.ifaceAddr()
 	} else {
-		ip = metrics.IfaceAddr("hypermesh")
+		iface := "hypermesh"
+		if a.cfg.ManagedDeviceID != "" {
+			iface = a.ingressIface
+		}
+		ip = metrics.IfaceAddr(iface)
 	}
 	if ip != "" {
 		return ip

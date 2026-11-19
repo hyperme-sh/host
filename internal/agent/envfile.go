@@ -18,16 +18,16 @@ var envKeyRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // ApplyStartupEnv allows a second managed service to start without reading the
 // primary service's environment, including its tenant and bootstrap credential.
-func ApplyStartupEnv() error {
+func ApplyStartupEnv() (string, error) {
 	path := os.Getenv("HYPERMESH_AGENT_ENV_FILE")
 	if path == "" {
-		return ApplyEnvFile(DefaultEnvFile)
+		return DefaultEnvFile, ApplyEnvFile(DefaultEnvFile)
 	}
 	info, err := os.Lstat(path)
 	if err != nil || !filepath.IsAbs(path) || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
-		return fmt.Errorf("hypermesh: explicit agent env must be an absolute private regular file")
+		return "", fmt.Errorf("hypermesh: explicit agent env must be an absolute private regular file")
 	}
-	return ApplyEnvFile(path)
+	return path, ApplyEnvFile(path)
 }
 
 // ApplyEnvFile copies KEY=VALUE lines into the process environment when
