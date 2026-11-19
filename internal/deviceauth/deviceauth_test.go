@@ -445,6 +445,35 @@ func TestRegistrationHandoffKeepsDirectLoginFallback(t *testing.T) {
 	}
 }
 
+func TestRegistrationHandoffPrefillsOnlyTheMatchingUserCode(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		path    string
+		prefill bool
+	}{
+		{"trusted", "/verify?user_code=ABCD-EFGH", true},
+		{"unexpected code", "/verify?user_code=1234-5678", false},
+		{"wrong path", "/other?user_code=ABCD-EFGH", false},
+		{"additional parameter", "/verify?user_code=ABCD-EFGH&device_code=" + deviceSecret, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.code = func(body map[string]any) {
+				body["verification_uri_complete"] = f.server.URL + tc.path
+			}
+			var output bytes.Buffer
+			_, err := authorizeRegistration(context.Background(), f.issuer, "https://portal.test.example", "f9fbdc96-2530-464b-9117-5fa906cfc93c", &output, f.server.Client(), func(context.Context, time.Duration) error { return nil })
+			want := f.server.URL + "/verify"
+			if tc.prefill {
+				want += "?user_code=ABCD-EFGH"
+			}
+			if err != nil || !strings.Contains(output.String(), "Verification URL: "+want+"\n") || strings.Contains(output.String(), deviceSecret) {
+				t.Fatal("unexpected verification instructions", err)
+			}
+		})
+	}
+}
+
 func TestRegistrationHandoffRejectsUntrustedDestinationBeforeRequests(t *testing.T) {
 	for _, dashboard := range []string{"http://portal.example", "https://user@portal.example", "https://portal.example/path", "https://portal.example?next=https://evil.example", "https://portal.example#fragment"} {
 		var output bytes.Buffer

@@ -59,7 +59,7 @@ func authorizeRegistration(ctx context.Context, issuer, dashboard, requestID str
 	}
 	// Display the continuation before starting the grant. Retain direct IdP
 	// instructions below for browsers that cannot open a second window.
-	if _, err := fmt.Fprintf(display, "Host setup URL: %s\nOpen this page to sign in and continue automatically to installation approval. Keep this terminal open.\n", address); err != nil {
+	if _, err := fmt.Fprintf(display, "Host setup URL: %s\nComplete device sign-in at the verification URL below, then return to this page to review the installation. Keep this terminal open.\n", address); err != nil {
 		return Token{}, errors.New("cannot display host setup instructions")
 	}
 	return authorizeWithInstructions(ctx, issuer, display, client, pause, true)
@@ -202,12 +202,13 @@ type discovery struct {
 	TokenEndpoint  string `json:"token_endpoint"`
 }
 type deviceCode struct {
-	Error           string `json:"error"`
-	DeviceCode      string `json:"device_code"`
-	UserCode        string `json:"user_code"`
-	VerificationURI string `json:"verification_uri"`
-	ExpiresIn       int    `json:"expires_in"`
-	Interval        int    `json:"interval"`
+	Error                   string `json:"error"`
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete"`
+	ExpiresIn               int    `json:"expires_in"`
+	Interval                int    `json:"interval"`
 }
 type tokenResponse struct {
 	AccessToken string `json:"access_token"`
@@ -293,9 +294,16 @@ func authorizeWithInstructions(ctx context.Context, issuer string, display io.Wr
 	}
 	instructions := "Open the verification URL on another device (phone or laptop). Keep this terminal open."
 	if handoff {
-		instructions = "Use the Host setup URL above. Direct sign-in fallback (return to the setup page afterward):"
+		instructions = "Open the verification URL and confirm this device sign-in in your browser. Then return to the Host setup URL above to review the installation."
 	}
-	if _, err := fmt.Fprintf(display, "%s\nVerification URL: %s\nUser code: %s\nApprove only the sign-in you initiated.\n", instructions, code.VerificationURI, code.UserCode); err != nil {
+	verification := code.VerificationURI
+	// Keycloak's complete URI can prefill the public user code. Display it
+	// only if it is exactly the trusted endpoint plus that one parameter.
+	complete := verification + "?" + url.Values{"user_code": {code.UserCode}}.Encode()
+	if code.VerificationURIComplete == complete && !strings.Contains(complete, code.DeviceCode) {
+		verification = complete
+	}
+	if _, err := fmt.Fprintf(display, "%s\nVerification URL: %s\nUser code: %s\nApprove only the sign-in you initiated.\n", instructions, verification, code.UserCode); err != nil {
 		return empty, errors.New("cannot display browser authorization instructions")
 	}
 	interval := time.Duration(code.Interval) * time.Second
