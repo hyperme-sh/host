@@ -103,7 +103,11 @@ func TestMacFirstReferenceFlagFreezesPlanPurpose(t *testing.T) {
 	old := buildinfo.Commit
 	buildinfo.Commit = manifest.CollectorCommit
 	defer func() { buildinfo.Commit = old }()
-	path := filepath.Join(f.d.root, "reference.json")
+	directory := filepath.Join(f.d.root, "reference")
+	if err := os.Mkdir(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "plan.json")
 	remote := &fakeNativeRemote{}
 	deps := nativeDeps{registration: f.d,
 		inventory: func(context.Context) (string, string, error) { return manifest.EnvironmentHash, manifest.Hardware, nil },
