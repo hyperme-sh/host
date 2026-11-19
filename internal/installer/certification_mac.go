@@ -76,7 +76,7 @@ func runNativeCertification(ctx context.Context, args []string, out, diagnostic 
 		return 2
 	}
 	fail := func(err error) int { fmt.Fprintln(diagnostic, err); return 1 }
-	if ((!planning || d.installation != nil) && *firstReference) || flags.NArg() != 0 || !filepath.IsAbs(*path) || (planning && !macSHA.MatchString(*registration)) || (!planning && (!*run || !macSHA.MatchString(*approved))) {
+	if (!planning && *firstReference) || flags.NArg() != 0 || !filepath.IsAbs(*path) || (planning && !macSHA.MatchString(*registration)) || (!planning && (!*run || !macSHA.MatchString(*approved))) {
 		return fail(fmt.Errorf("require an absolute --plan; planning requires --registration-plan-sha; execution requires --approve-plan and --run"))
 	}
 	// Resolve only Darwin's fixed root-owned /var and /etc aliases.
