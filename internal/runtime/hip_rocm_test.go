@@ -21,9 +21,9 @@ func TestResolveBackendHIPROCmEnabled(t *testing.T) {
 	if HostLogLabel() != BackendHIPROCm {
 		t.Fatalf("host log %q", HostLogLabel())
 	}
-	path, reason = ResolveBackend("llama-cpp-vulkan")
-	if path != StubFail || reason != "This image does not run llama-cpp-vulkan." {
-		t.Fatalf("vulkan stays stub: path=%v reason=%q", path, reason)
+	path, reason = ResolveBackend("unknown-backend")
+	if path != StubFail || reason != "This image does not run unknown-backend." {
+		t.Fatalf("unknown backend must stay unavailable: path=%v reason=%q", path, reason)
 	}
 	path, reason = ResolveBackend("")
 	if path != NVIDIAContainer {

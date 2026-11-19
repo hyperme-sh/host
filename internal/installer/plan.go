@@ -37,7 +37,7 @@ func runPlan(ctx context.Context, args []string, out, diagnostic io.Writer,
 	resources resourceProbe, detect func(context.Context) hardware.Profile, endpoint endpointProbe) int {
 	flags := flag.NewFlagSet("plan", flag.ContinueOnError)
 	flags.SetOutput(diagnostic)
-	mode := flags.String("memory-mode", "", "cpu, uma or discrete")
+	mode := flags.String("memory-mode", "", "cpu, uma, uma-vulkan or discrete")
 	directory := flags.String("model-dir", "", "existing model-cache directory")
 	allocation := flags.Int64("uma-gib", 0, "optional diagnostic allocation in GiB; omit for minimum-only installation")
 	address := flags.String("aiuditor-check-url", "", "readiness URL; HTTPS, no credentials or query parameters")
@@ -66,6 +66,20 @@ func runPlan(ctx context.Context, args []string, out, diagnostic io.Writer,
 	}
 	p.Blockers = append(p.Blockers, p.Resources.Admission.Reasons...)
 	p.Hardware = detect(ctx)
+	if *mode == haloMemoryMode {
+		r := p.Resources.Resources
+		if !haloHardware(p.Hardware.Facts, r.SystemBytes) || !validUMARuntime(r.UMARuntime) || r.UMARuntime.Backend != "vulkan" {
+			p.Blockers = append(p.Blockers, "Halo Vulkan requires a supported amd64 processor and measured AMD render memory")
+		} else {
+			facts := p.Hardware.Facts
+			facts.CUDA, facts.HIP, facts.Vulkan = false, false, true
+			facts.GPU = "AMDGPU integrated Radeon"
+			facts.StrixHaloGTTFreeBytes = r.UMARuntime.FreeBytes
+			profile := hardware.Recommend(facts)
+			profile.MemoryEncryption = p.Hardware.MemoryEncryption
+			p.Hardware = profile
+		}
+	}
 	switch p.Hardware.Facts.Arch {
 	case "amd64", "arm64", "aarch64":
 	default:

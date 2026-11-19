@@ -188,3 +188,15 @@ func partials(t *testing.T, dir string) []string {
 	}
 	return matches
 }
+
+func TestHaloTestModelSourceIsExact(t *testing.T) {
+	url, err := TrustedDownloadURL(haloQwen3CoderRef)
+	if err != nil || url != "https://huggingface.co/"+strings.Replace(haloQwen3CoderRef, "@", "/resolve/", 1) {
+		t.Fatalf("unexpected exact artifact URL: %q %v", url, err)
+	}
+	for _, ref := range []string{strings.Split(haloQwen3CoderRef, "@")[0] + "@main/model.gguf", strings.Replace(haloQwen3CoderRef, "Q4_K_M.gguf", "Q6_K.gguf", 1)} {
+		if _, err := TrustedDownloadURL(ref); err == nil {
+			t.Fatal("accepted an unreviewed Unsloth artifact")
+		}
+	}
+}

@@ -285,6 +285,7 @@ func RunInstallAgent(ctx context.Context,args []string,out,diagnostic io.Writer)
 	if err==nil{err=decodeSetupJSON(raw,&p)}
 	if err==nil && (p.SHA256!=*approved||agentPlanDigest(p)!=*approved){err=fmt.Errorf("agent approval digest does not match")}
 	if err==nil{err=validateAgentInputs(p)}
+	if err==nil && haloSetup(p.Setup.Preflight) {err=fmt.Errorf("use install-halo-test for an isolated Halo TEST profile")}
 	if err!=nil{fmt.Fprintln(diagnostic,err);return 1}
 	unlock,err:=lockRebootState("",agentSetupState(p))
 	if err!=nil{fmt.Fprintln(diagnostic,err);return 1};defer unlock()
@@ -335,16 +336,24 @@ func RunAgentInstallStatus(_ context.Context,args []string,out,diagnostic io.Wri
 	return 0
 }
 
+var defaultAgentUnits = []string{"hypermesh-agent.service","hypermesh-wg.service",
+	"hypermesh-agent.service.d","hypermesh-wg.service.d","hypermesh-.service.d","service.d"}
 func checkAgentUnitPaths(ctx context.Context,source setupSource,root string,files []agentPayload)error {
+	return checkAgentUnitPathsFor(ctx,source,root,files,defaultAgentUnits)
+}
+func checkAgentUnitPathsFor(ctx context.Context,source setupSource,root string,files []agentPayload,names []string)error {
 	// Include compiled defaults (even currently empty paths) and the running
 	// manager's actual search path. Never assume /etc and /usr/lib are exhaustive.
 	defaults,err:=source.output(ctx,"systemd-analyze","--system","unit-paths")
 	if err!=nil{return fmt.Errorf("cannot determine systemd unit search paths")}
 	actual,err:=source.output(ctx,"systemctl","--system","show","-p","UnitPath","--value")
 	if err!=nil{return fmt.Errorf("cannot determine running systemd unit search paths")}
-	return checkAgentUnitPathList(root,files,string(defaults)+"\n"+string(actual))
+	return checkAgentUnitPathListFor(root,files,string(defaults)+"\n"+string(actual),names)
 }
 func checkAgentUnitPathList(root string,files []agentPayload,raw string)error {
+	return checkAgentUnitPathListFor(root,files,raw,defaultAgentUnits)
+}
+func checkAgentUnitPathListFor(root string,files []agentPayload,raw string,names []string)error {
 	paths:=strings.Fields(raw)
 	if len(paths)==0{return fmt.Errorf("systemd unit search path is empty")}
 	managed:=map[string]bool{}
@@ -353,8 +362,7 @@ func checkAgentUnitPathList(root string,files []agentPayload,raw string)error {
 		if !filepath.IsAbs(dir)||filepath.Clean(dir)!=dir||strings.ContainsAny(dir,"\\\"'"){
 			return fmt.Errorf("cannot safely interpret systemd unit search path")
 		}
-		for _,name:=range []string{"hypermesh-agent.service","hypermesh-wg.service",
-			"hypermesh-agent.service.d","hypermesh-wg.service.d","hypermesh-.service.d","service.d"} {
+		for _,name:=range names {
 			path:=filepath.Join(dir,name)
 			if managed[path] {continue} // Exact bytes/type/mode checked by the install engine.
 			if _,err:=os.Lstat(agentDest(root,path));!os.IsNotExist(err){

@@ -1406,6 +1406,8 @@ func runnerLog(path runtime.Path) string {
 	switch path {
 	case runtime.CPUContainer:
         return runtime.BackendLlamaCppCPU
+	case runtime.VulkanContainer:
+        return runtime.BackendLlamaCppVulkan
 	case runtime.HIPROCm:
 		return runtime.BackendHIPROCm
 	case runtime.LlamaCppHost:
@@ -1417,6 +1419,8 @@ func runnerLog(path runtime.Path) string {
 
 func (a *Agent) starterFor(path runtime.Path) runtime.Starter {
 	switch path {
+    case runtime.VulkanContainer:
+        return runtime.NewVulkan()
  case runtime.CPUContainer:
         if a.cpu!=nil {return a.cpu}
         return runtime.NewCPU()

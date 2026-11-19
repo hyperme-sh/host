@@ -23,7 +23,7 @@ type UMARuntime struct {
 }
 
 func validUMARuntime(r *UMARuntime) bool {
-	return r != nil && (r.Backend == "cuda" || r.Backend == "hip") &&
+	return r != nil && (r.Backend == "cuda" || r.Backend == "hip" || r.Backend == "vulkan") &&
 		r.Device >= 0 && r.Device < 64 && r.FreeBytes > 0 && r.TotalBytes >= r.FreeBytes
 }
 
@@ -46,7 +46,7 @@ func probeUMARuntime(ctx context.Context) (*UMARuntime, error) {
 		return nil, fmt.Errorf("cannot query UMA runtime: install Python 3 and the supported CUDA/HIP driver, check GPU access and expose exactly one integrated accelerator; no allocation inferred from RAM")
 	}
 	var r UMARuntime
-	if err := json.Unmarshal(out.Bytes(), &r); err != nil || !validUMARuntime(&r) {
+	if err := json.Unmarshal(out.Bytes(), &r); err != nil || !validUMARuntime(&r) || r.Backend == "vulkan" {
 		return nil, fmt.Errorf("invalid UMA runtime measurement; check the CUDA/HIP installation")
 	}
 	return &r, nil

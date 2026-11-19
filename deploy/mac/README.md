@@ -477,7 +477,7 @@ There is no CUDA on Mac. Do not send `cuda-jetson` and expect it to work on Appl
 | `backend` | Darwin binary | Linux CPU-tagged binary |
 |---|---|---|
 | `llama-cpp-cpu` | Metal llama.cpp host runner (lab) | isolated CPU container; default untagged builds retain the stub |
-| `llama-cpp-vulkan` | stub (same string) | stub |
+| `llama-cpp-vulkan` | stub (same string) | [AMD Vulkan container](../rocm/README.md#managed-vulkan-leases) on amd64 |
 | `llama-cpp-metal` | **not in the enum** | same |
 | `hip-rocm` | stub unless `-tags rocm` | stub unless `-tags rocm` |
 

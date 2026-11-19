@@ -38,6 +38,8 @@ func setupProfiles() []SetupProfile {
 		{"debian-arm64-cpu", 1, "candidate; physical acceptance pending", "preserve installed vendor stack", append([]string{}, packages...), []string{"wireguard-go"}},
  {"ubuntu-arm64-cpu", 1, "candidate; physical acceptance pending", "preserve installed vendor stack", append([]string{}, packages...), []string{"wireguard-go"}},
  {"ubuntu-jetson-cuda", 3, "candidate; physical acceptance pending", "preserve installed vendor stack", append([]string{}, packages...), []string{"wireguard-go"}},
+		{"debian-amd-halo-vulkan", 1, "candidate", "preserve installed AMDGPU and Mesa", append([]string{}, packages...), []string{"wireguard-go"}},
+		{"ubuntu-amd-halo-vulkan", 1, "candidate", "preserve installed AMDGPU and Mesa", append([]string{}, packages...), []string{"wireguard-go"}},
 		{"ubuntu-amd-hip", 3, "candidate; physical acceptance pending", "preserve installed vendor stack", append([]string{}, packages...), []string{"wireguard-go"}},
 		{"ubuntu-discrete-cuda", 3, "candidate; physical acceptance pending", "preserve installed vendor stack", append([]string{}, packages...), []string{"wireguard-go"}},
 	}
@@ -131,7 +133,7 @@ func runSetupPlan(ctx context.Context, args []string, out, diagnostic io.Writer,
 	preflight func(context.Context, []string, io.Writer, io.Writer) int) int {
 	flags := flag.NewFlagSet("plan-setup", flag.ContinueOnError)
 	flags.SetOutput(diagnostic)
-	mode := flags.String("memory-mode", "", "uma or discrete")
+	mode := flags.String("memory-mode", "", "cpu, uma, uma-vulkan or discrete")
 	directory := flags.String("model-dir", "", "existing model-cache directory")
 	allocation := flags.Int64("uma-gib", 0, "optional diagnostic allocation in GiB; omit for minimum-only installation")
 	address := flags.String("aiuditor-check-url", "", "readiness URL (HTTPS)")
@@ -181,7 +183,11 @@ func normalizedSetupArch(arch string) string {
 }
 
 func selectSetupProfile(p Plan, platform SetupPlatform, requested string) (*SetupProfile, error) {
-	if !((platform.OS == "ubuntu" && (platform.Version == "22.04" || platform.Version == "24.04")) || (platform.OS=="debian" && (platform.Version=="12"||platform.Version=="13"))) {
+	isHalo := haloSetup(p)
+	ubuntu := platform.OS == "ubuntu" && (platform.Version == "22.04" || platform.Version == "24.04" ||
+		(isHalo && platform.Version == "26.10"))
+	debian := platform.OS == "debian" && (platform.Version == "12" || platform.Version == "13")
+	if !ubuntu && !debian {
 		return nil, fmt.Errorf("no setup policy for this OS; use a supported Ubuntu or Debian profile")
 	}
 	f := p.Hardware.Facts
@@ -191,6 +197,8 @@ func selectSetupProfile(p Plan, platform SetupPlatform, requested string) (*Setu
 	cpuSystem:=hardware.SystemID(f)
  if p.Resources.MemoryMode=="cpu" && p.Resources.Resources.CPU && arch=="arm64" && (cpuSystem=="radxa-rock-5"||cpuSystem=="radxa-orion-o6n"||cpuSystem=="renesas-rz-v2h") {
     id=platform.OS+"-arm64-cpu"
+ } else if isHalo {
+    id=platform.OS+"-amd-halo-vulkan"
  } else if platform.OS=="debian" {return nil,fmt.Errorf("Debian accelerator setup policies are not qualified")
  } else if p.Resources.Resources.UMA {
 		r := p.Resources.Resources.UMARuntime
@@ -271,8 +279,12 @@ func buildSetupPlan(ctx context.Context, p Plan, requested, wireguardMode string
 			digest := sha256.Sum256(canonical)
 			result.Platform.PackageStateSHA256 = hex.EncodeToString(digest[:])
 			result.Platform.ProtectedPackages = []PackageChange{}
+			profileID := ""
+			if result.Profile != nil {
+				profileID = result.Profile.ID
+			}
 			for name, version := range installed {
-				if protectedSetupPackage(name) {
+				if protectedProfilePackage(profileID, name) {
 					result.Platform.ProtectedPackages = append(result.Platform.ProtectedPackages, PackageChange{name, version, version})
 				}
 			}
@@ -280,7 +292,24 @@ func buildSetupPlan(ctx context.Context, p Plan, requested, wireguardMode string
 		}
 	}
 	if result.Profile != nil && installed != nil {
-		result.Packages, err = resolveSetupPackages(ctx, source, installed, result.Profile.RequiredPackages, normalizedSetupArch(p.Hardware.Facts.Arch))
+		arch := normalizedSetupArch(p.Hardware.Facts.Arch)
+		required := result.Profile.RequiredPackages
+		hasDocker := hasNativePackage(installed, "docker.io", arch) || hasNativePackage(installed, "docker-ce", arch)
+		if haloSetup(p) {
+			if headless || wireguardMode != "kernel" {
+				fail("Halo TEST setup requires kernel WireGuard and preserves the current boot target")
+			}
+			if !hasDocker {
+				if err := dockerServiceAbsent(ctx, source); err != nil {
+					fail(err.Error())
+				} else {
+					required = append(append([]string{}, required...), "docker.io")
+				}
+			}
+		} else if !hasDocker {
+			fail("Docker engine is not installed through a recognized package; install the profile-compatible engine and rerun planning")
+		}
+		result.Packages, err = resolveSetupPackages(ctx, source, installed, required, arch)
 		if err != nil { fail(err.Error()); result.Packages = []PackageChange{} }
 		if len(result.Packages) > 0 {
 			argv := setupInstallArgv(result.Packages)
@@ -294,6 +323,8 @@ func buildSetupPlan(ctx context.Context, p Plan, requested, wireguardMode string
 			switch result.Profile.ID {
 			case "ubuntu-jetson-cuda":
 				vendorKnown = vendorKnown || base == "nvidia-l4t-core"
+			case "debian-amd-halo-vulkan", "ubuntu-amd-halo-vulkan":
+				vendorKnown = vendorKnown || base == "mesa-vulkan-drivers"
 			case "ubuntu-amd-hip":
 				vendorKnown = vendorKnown || base == "hip-runtime-amd"
 			case "ubuntu-discrete-cuda":
@@ -301,11 +332,6 @@ func buildSetupPlan(ctx context.Context, p Plan, requested, wireguardMode string
 			}
 		}
 		if !vendorKnown { fail("vendor runtime package version is unknown; use a package-managed vendor stack before planning") }
-		// Do not silently replace an existing Docker distribution or configure
-		// the vendor container runtime using a generic distro package.
-		if !hasNativePackage(installed, "docker.io", normalizedSetupArch(p.Hardware.Facts.Arch)) && !hasNativePackage(installed, "docker-ce", normalizedSetupArch(p.Hardware.Facts.Arch)) {
-			fail("Docker engine is not installed through a recognized package; install the profile-compatible engine and rerun planning")
-		}
 	}
 	if headless && result.Platform.DefaultTarget == "graphical.target" {
 		result.Changes = append(result.Changes, SetupChange{"headless-next-boot", "boot-target", false,

@@ -29,6 +29,10 @@ var GGUFPublisherAllowlist = map[string]struct{}{
 	"fyberlabs":          {},
 }
 
+// The Halo TEST comparison admits one reviewed Unsloth artifact, alongside
+// the existing publisher policy. Its bytes still need the catalog SHA-256.
+const haloQwen3CoderRef = "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF@b17cb02dd882d5b6ab62fc777ad2995f19668350/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf"
+
 // TrustedDownloadURL turns a source_ref (repo@rev/file or https HF URL) into
 // a single allowlisted download URL. Fail closed on untrusted hosts/publishers.
 func TrustedDownloadURL(sourceRef string) (string, error) {
@@ -81,7 +85,7 @@ func trustedHFRef(ref string) (string, error) {
 	revision := rest[:slash]
 	fileName := rest[slash+1:]
 	publisher := strings.ToLower(strings.Split(repo, "/")[0])
-	if _, ok := GGUFPublisherAllowlist[publisher]; !ok {
+	if _, ok := GGUFPublisherAllowlist[publisher]; !ok && ref != haloQwen3CoderRef {
 		return "", fmt.Errorf("hypermesh: untrusted publisher %q", publisher)
 	}
 	if !strings.Contains(repo, "/") || strings.ContainsAny(repo, " \t\n") {

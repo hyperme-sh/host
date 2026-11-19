@@ -93,6 +93,7 @@ func certTunnel(ctx context.Context,p certificationPlan,j registrationJournal,c 
 }
 
 func RunPlanCertification(ctx context.Context,args []string,out,diagnostic io.Writer)int{
+ if len(args)>0 && args[0]=="--halo-test" {return runHaloNativeCertification(ctx,args[1:],out,diagnostic,true)}
  f:=flag.NewFlagSet("plan-certification",flag.ContinueOnError);f.SetOutput(diagnostic)
  path:=f.String("agent-plan","","installed agent plan")
  if err:=f.Parse(args);err!=nil{if err==flag.ErrHelp{return 0};return 2}
@@ -159,6 +160,7 @@ func performCertification(ctx context.Context,p certificationPlan,j *certificati
  return nil
 }
 func RunCertifyAgent(ctx context.Context,args []string,out,diagnostic io.Writer)int{
+ if len(args)>0 && args[0]=="--halo-test" {return runHaloNativeCertification(ctx,args[1:],out,diagnostic,false)}
  return runCertificationCommand(ctx,args,out,diagnostic,false)
 }
 func RunActivateAgent(ctx context.Context,args []string,out,diagnostic io.Writer)int{

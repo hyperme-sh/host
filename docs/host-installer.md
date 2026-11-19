@@ -2129,3 +2129,44 @@ Define a distinct `HYPERMESH_WG_IFACE` before running the agent. Use a matching
 userspace WireGuard service where required. The Plane and Gateway must assign
 this interface an overlay that is disjoint from other interfaces on the
 machine. Restore the private state directory as part of a Host rebuild.
+
+### Native Halo TEST profile
+
+HALO395-1 and HALO495-1 use managed Vulkan through a dedicated TEST agent. On
+these Ubuntu 26.10 hosts, preserve the installed AMDGPU, Mesa and kernel. Supply
+the trusted release key through the existing signed bootstrap. The bootstrap
+selects the current TEST download and provides the immutable download directory
+for `plan-agent`. The installed service follows the moving TEST channel.
+
+Run the signed native installer once per host from the provisioning runner.
+
+```bash
+sudo ./hypermesh-host install-halo-test \
+  --bootstrap-info ./hypermesh-host.install.json --host-name HALO495-1
+```
+
+Preserve the verified bootstrap files and `/var/lib/hypermesh-halo-test` across
+recovery. Repeat the same command to resume with the saved plans and identity.
+The installer discovers the TEST tenant and uses root-private directories.
+Its stages are available separately for diagnostics.
+
+1. Run `plan-setup --memory-mode uma-vulkan --wireguard-mode kernel --model-dir /var/lib/hypermesh-halo-test/models --aiuditor-check-url https://api.test.hyperme.sh/api/v1/hypermesh/public/host-installation`.
+   The plan includes missing native packages and exact versions for the full APT
+   dependency closure. It can install Ubuntu's Docker package and WireGuard
+   tools when missing. It preserves existing package-managed Docker installations.
+2. Run `apply-setup --state-dir /var/lib/hypermesh-halo-test/installer --plan FILE --approve-plan SHA256`
+   with the plan's `plan_sha256`. On retry, use the existing installer journal.
+3. Run `plan-agent` with that prerequisite plan, the signed TEST bundle and
+   its trust key and fingerprint,
+   `--setup-state-dir /var/lib/hypermesh-halo-test/installer`, `--channel test`,
+   `--control-plane-url https://api.test.hyperme.sh`, the canonical TEST tenant
+   ID, and the matching Halo alias. Preserve the generated agent plan with the
+   private registration journal so retries use the original request.
+4. Run `install-halo-test --plan FILE --approve-plan SHA256` using its agent
+   plan hash. The current Plane contract issues device login and browser approval
+   links for the canonical TEST host owner. It registers the device paused and
+   stages the separate service without starting it.
+5. Record the returned TEST device ID in the owner inventory. Apply the two
+   Plane participants to the same physical capacity slot through Infra. Start
+   the TEST service after both Planes have the shared slot binding and the TEST
+   WireGuard overlay is distinct from production.

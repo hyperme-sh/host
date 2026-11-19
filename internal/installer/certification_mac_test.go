@@ -114,7 +114,7 @@ func TestMacFirstReferenceFlagFreezesPlanPurpose(t *testing.T) {
 		remote:    func(string, string) (nativeRemote, error) { return remote, nil }}
 	args := []string{"--registration-plan-sha", f.journal(t).PlanSHA256, "--plan", path}
 	var out, diag bytes.Buffer
-	if code := runMacNativeCertification(context.Background(), append(args, "--first-reference"), &out, &diag, true, deps); code != 0 {
+	if code := runNativeCertification(context.Background(), append(args, "--first-reference"), &out, &diag, true, deps); code != 0 {
 		t.Fatal(diag.String())
 	}
 	var current nativePlan
@@ -123,7 +123,7 @@ func TestMacFirstReferenceFlagFreezesPlanPurpose(t *testing.T) {
 		current.Run.Manifest.Purpose != hostregistration.NativeReferencePurpose || current.Run.Manifest.DecodeTokS != 0 {
 		t.Fatal("native first-reference purpose was not retained")
 	}
-	if code := runMacNativeCertification(context.Background(), args, &out, &diag, true, deps); code == 0 {
+	if code := runNativeCertification(context.Background(), args, &out, &diag, true, deps); code == 0 {
 		t.Fatal("accepted retry with a mismatched plan purpose")
 	}
 }
@@ -168,7 +168,7 @@ func TestNativePlanningAndUploadRetriesRetainIdentityAndWork(t *testing.T) {
 	planArgs := []string{"--registration-plan-sha", j.PlanSHA256, "--plan", path}
 	call := func(planning bool, args []string) (int, string, string) {
 		var out, diag bytes.Buffer
-		code := runMacNativeCertification(context.Background(), args, &out, &diag, planning, d)
+		code := runNativeCertification(context.Background(), args, &out, &diag, planning, d)
 		return code, out.String(), diag.String()
 	}
 	if code, _, diag := call(true, planArgs); code == 0 || !strings.Contains(diag, "lost planning response") {
@@ -287,48 +287,60 @@ func TestNativeRuntimeResolutionRequiresTrustedOwnershipAndModes(t *testing.T) {
 	}
 }
 
-func TestNativeVulkanDepthProofMatchesStrixClass(t *testing.T) {
-	for _, target := range []struct{ class, gpu string }{
-		{"amd-ryzen-ai-max-395", "AMD Radeon 8060S Graphics (RADV STRIX_HALO)"},
-		{"amd-ryzen-ai-max-495", "AMD Radeon 8065S (RADV STRIX_HALO)"},
-	} {
-		t.Run(target.class, func(t *testing.T) {
-			report, manifest := nativeFixtureReport()
-			manifest.ClassID, manifest.Protocol = target.class, hostregistration.NativeVulkanProtocol
-			manifest.OS, manifest.Arch, manifest.Device = "linux", "amd64", "Vulkan0"
-			report.OS, report.Arch, report.Device, report.Backend = manifest.OS, manifest.Arch, manifest.Device, "vulkan"
-			for i := range report.Samples {
+func TestNativeVulkanEvidenceBindsBothHaloClasses(t *testing.T) {
+	for _, hardwareClass := range []string{"amd-ryzen-ai-max-395", "amd-ryzen-ai-max-495"} {
+		t.Run(hardwareClass, func(t *testing.T) {
+			r, m := nativeFixtureReport()
+			m.ClassID, m.HardwareClassID = "amd-halo-vulkan-lab", hardwareClass
+			m.Protocol, m.OS, m.Arch, m.Device = hostregistration.NativeVulkanProtocol, "linux", "amd64", "Vulkan0"
+			r.OS, r.Arch, r.Device, r.Backend = m.OS, m.Arch, m.Device, "vulkan"
+			for i := range r.Samples {
+				raw := bytes.ReplaceAll(r.Samples[i].Raw, []byte("MTL0"), []byte("Vulkan0"))
+				raw = bytes.ReplaceAll(raw, []byte("MTL,BLAS"), []byte("Vulkan,BLAS"))
+				gpu := "AMD Radeon 8060S Graphics (RADV STRIX_HALO)"
+				if hardwareClass == "amd-ryzen-ai-max-495" {
+					gpu = "AMD Radeon 8065S (RADV STRIX_HALO)"
+				}
 				var rows []map[string]any
-				if err := json.Unmarshal(report.Samples[i].Raw, &rows); err != nil {
+				if err := json.Unmarshal(raw, &rows); err != nil {
 					t.Fatal(err)
 				}
-				rows[0]["devices"], rows[0]["backends"], rows[0]["gpu_info"] = manifest.Device, "Vulkan", target.gpu
-				raw, err := json.Marshal(rows)
+				rows[0]["gpu_info"] = gpu
+				var err error
+				r.Samples[i].Raw, err = json.Marshal(rows)
 				if err != nil {
 					t.Fatal(err)
 				}
-				report.Samples[i].Raw = raw
 			}
-			proof, err := nativeEvidence(report, manifest)
-			if err != nil || len(proof.Samples) != 3 || proof.Samples[0].Backend != "vulkan" {
-				t.Fatalf("Vulkan proof failed: %v", err)
+			e, err := nativeEvidence(r, m)
+			if err != nil || len(e.Samples) != 3 || e.Samples[0].Backend != "vulkan" || !e.CleanupComplete {
+				t.Fatalf("valid Vulkan samples refused: %v", err)
 			}
-			lab := manifest
-			lab.ClassID, lab.HardwareClassID = "amd-halo-vulkan-lab", target.class
-			if _, err := nativeEvidence(report, lab); err != nil {
-				t.Fatalf("shared TEST catalog lost physical class binding: %v", err)
+			for i := range r.Samples {
+				original := append([]byte(nil), r.Samples[i].Raw...)
+				for _, gpu := range []string{"", "AMD Radeon 8060S", "AMD Radeon 8065S", "AMD Radeon 18060S (RADV STRIX_HALO)", "AMD Radeon 8060S 8065S (RADV STRIX_HALO)", "AMD Radeon 8060S (RADV STRIX_HALO)", "AMD Radeon 8065S (RADV STRIX_HALO)"} {
+					if hardwareClass == "amd-ryzen-ai-max-395" && gpu == "AMD Radeon 8060S (RADV STRIX_HALO)" || hardwareClass == "amd-ryzen-ai-max-495" && gpu == "AMD Radeon 8065S (RADV STRIX_HALO)" {
+						continue
+					}
+					var rows []map[string]any
+					if err := json.Unmarshal(original, &rows); err != nil {
+						t.Fatal(err)
+					}
+					rows[0]["gpu_info"] = gpu
+					var err error
+					r.Samples[i].Raw, err = json.Marshal(rows)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := nativeEvidence(r, m); err == nil {
+						t.Fatalf("accepted wrong GPU in sample %d: %q", i, gpu)
+					}
+				}
+				r.Samples[i].Raw = original
 			}
-			lab.HardwareClassID = ""
-			if _, err := nativeEvidence(report, lab); err == nil {
-				t.Fatal("shared TEST catalog accepted without a physical class")
-			}
-			if manifest.ClassID == "amd-ryzen-ai-max-395" {
-				manifest.ClassID = "amd-ryzen-ai-max-495"
-			} else {
-				manifest.ClassID = "amd-ryzen-ai-max-395"
-			}
-			if _, err := nativeEvidence(report, manifest); err == nil {
-				t.Fatal("accepted Vulkan samples from the other Strix model")
+			r.Samples[0].Raw = bytes.ReplaceAll(r.Samples[0].Raw, []byte("Vulkan,BLAS"), []byte("CUDA"))
+			if _, err := nativeEvidence(r, m); err == nil {
+				t.Fatal("accepted non-Vulkan samples for Vulkan certification")
 			}
 		})
 	}

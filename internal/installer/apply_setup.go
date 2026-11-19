@@ -78,10 +78,13 @@ func validateSetupApprovalPolicy(p SetupPlan, approved string, installed bool) e
   }
 	}
 	if validateEndpoint(p.ReadinessURL)!=nil || p.Preflight.Resources.ModelDirectory=="" ||
-		(p.Preflight.Resources.MemoryMode!="cpu" && p.Preflight.Resources.MemoryMode!="uma" && p.Preflight.Resources.MemoryMode!="discrete") {
+		(p.Preflight.Resources.MemoryMode!="cpu" && p.Preflight.Resources.MemoryMode!="uma" && p.Preflight.Resources.MemoryMode!=haloMemoryMode && p.Preflight.Resources.MemoryMode!="discrete") {
 		return fmt.Errorf("plan lacks valid preflight inputs; regenerate it")
 	}
 	if p.WireGuardMode!="kernel" && p.WireGuardMode!="userspace" { return fmt.Errorf("invalid WireGuard mode") }
+	if haloSetup(p.Preflight) && (p.HeadlessRequested || p.WireGuardMode!="kernel") {
+		return fmt.Errorf("Halo TEST setup requires kernel WireGuard and preserves the current boot target")
+	}
 	profile,err:=selectSetupProfile(p.Preflight,p.Platform,p.Profile.ID)
 	if err!=nil { return err }
 	if p.WireGuardMode=="userspace" {
@@ -95,7 +98,7 @@ func validateSetupApprovalPolicy(p SetupPlan, approved string, installed bool) e
 		base:=packageBase(pkg.Name)
 		if _,arch,qualified:=strings.Cut(pkg.Name,":"); qualified && arch!=normalizedSetupArch(p.Preflight.Hardware.Facts.Arch) { return fmt.Errorf("foreign package architecture is outside this plan") }
 		if !setupPackageRE.MatchString(pkg.Name) || !setupVersionRE.MatchString(pkg.To) || pkg.From!="" ||
-			protectedSetupPackage(pkg.Name) || seen[base] || (i>0 && p.Packages[i-1].Name>=pkg.Name) {
+			protectedProfilePackage(p.Profile.ID,pkg.Name) || seen[base] || (i>0 && p.Packages[i-1].Name>=pkg.Name) {
 			return fmt.Errorf("plan contains an invalid, duplicate or protected package change")
 		}
 		seen[base]=true
@@ -192,7 +195,12 @@ func validateSetupHostPackages(ctx context.Context,p SetupPlan,deps setupApplyDe
 	if err!=nil {return nil,"",err}
 	if len(remaining)>0 {
 		args:=[]string{"--simulate","--no-install-recommends","--no-remove","install"}
-		for _,pkg:=range remaining {args=append(args,pkg.Name+"="+pkg.To)}
+		for _,pkg:=range remaining {
+			if haloSetup(p.Preflight) && packageBase(pkg.Name)=="docker.io" {
+				if err=dockerServiceAbsent(ctx,deps.Source);err!=nil{return nil,"",err}
+			}
+			args=append(args,pkg.Name+"="+pkg.To)
+		}
 		raw,err=deps.Source.output(ctx,"apt-get",args...)
 		if err!=nil {return nil,"",fmt.Errorf("approved package versions cannot be resolved; regenerate the plan")}
 		resolved,err:=parseSetupSimulation(string(raw),installed)
