@@ -86,6 +86,44 @@ func (f *fakeNativeRemote) PlanNativeCertification(_ context.Context, r hostregi
 	}
 	return f.run, nil
 }
+func (f *fakeNativeRemote) PlanNativeReference(ctx context.Context, r hostregistration.Request, device, secret, id, env, hw string) (hostregistration.NativeRun, error) {
+	run, err := f.PlanNativeCertification(ctx, r, device, secret, id, env, hw)
+	run.Manifest.Purpose = hostregistration.NativeReferencePurpose
+	run.Manifest.DecodeTokS = 0
+	return run, err
+}
+
+func TestMacFirstReferenceFlagFreezesPlanPurpose(t *testing.T) {
+	f := newMacFixture(t)
+	if code, _, diag := f.run(); code != 0 {
+		t.Fatal(diag)
+	}
+	_, manifest := nativeFixtureReport()
+	t.Setenv("HYPERMESH_SOURCE_SHA", "")
+	old := buildinfo.Commit
+	buildinfo.Commit = manifest.CollectorCommit
+	defer func() { buildinfo.Commit = old }()
+	path := filepath.Join(f.d.root, "reference.json")
+	remote := &fakeNativeRemote{}
+	deps := nativeDeps{registration: f.d,
+		inventory: func(context.Context) (string, string, error) { return manifest.EnvironmentHash, manifest.Hardware, nil },
+		remote:    func(string, string) (nativeRemote, error) { return remote, nil }}
+	args := []string{"--registration-plan-sha", f.journal(t).PlanSHA256, "--plan", path}
+	var out, diag bytes.Buffer
+	if code := runMacNativeCertification(context.Background(), append(args, "--first-reference"), &out, &diag, true, deps); code != 0 {
+		t.Fatal(diag.String())
+	}
+	var current nativePlan
+	raw, err := os.ReadFile(path)
+	if err != nil || json.Unmarshal(raw, &current) != nil || !current.FirstReference || current.Run == nil ||
+		current.Run.Manifest.Purpose != hostregistration.NativeReferencePurpose || current.Run.Manifest.DecodeTokS != 0 {
+		t.Fatal("native first-reference purpose was not retained")
+	}
+	if code := runMacNativeCertification(context.Background(), args, &out, &diag, true, deps); code == 0 {
+		t.Fatal("accepted retry with a mismatched plan purpose")
+	}
+}
+
 func (f *fakeNativeRemote) ReportNativeCertification(_ context.Context, r hostregistration.Request, device, secret string, run hostregistration.NativeRun, e hostregistration.NativeEvidence) (hostregistration.NativeRun, error) {
 	f.reportCalls++
 	if f.loseReport {
