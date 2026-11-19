@@ -20,6 +20,7 @@ type NativeManifest struct {
 	SuiteID            string   `json:"suite_id"`
 	CatalogID          string   `json:"catalog_id"`
 	ClassID            string   `json:"class_id"`
+	HardwareClassID    string   `json:"hardware_class_id,omitempty"`
 	Purpose            string   `json:"purpose"`
 	Protocol           string   `json:"measurement_protocol"`
 	FileHash           string   `json:"file_hash"`
@@ -40,6 +41,15 @@ type NativeManifest struct {
 	PhysicalAcceptance bool     `json:"physical_acceptance"`
 }
 
+// VulkanHardwareClass is the physical GPU class frozen by Plane, including
+// for the common TEST catalog class.
+func (m NativeManifest) VulkanHardwareClass() string {
+	if m.ClassID != "amd-halo-vulkan-lab" {
+		return m.ClassID
+	}
+	return m.HardwareClassID
+}
+
 func (m NativeManifest) Validate() error {
 	if stamp, e := time.Parse(time.RFC3339Nano, m.InventoryEpoch); e != nil || stamp.IsZero() {
 		return fmt.Errorf("native inventory epoch is missing")
@@ -48,7 +58,7 @@ func (m NativeManifest) Validate() error {
 		m.Purpose == NativeReferencePurpose && m.DecodeTokS == 0
 	validPlatform := m.ClassID == "darwin-arm64-lab" && m.Protocol == NativeMetalProtocol &&
 		m.OS == "darwin" && m.Arch == "arm64" && m.Device == "MTL0" ||
-		oneOf(m.ClassID, "amd-ryzen-ai-max-395", "amd-ryzen-ai-max-495") &&
+		oneOf(m.VulkanHardwareClass(), "amd-ryzen-ai-max-395", "amd-ryzen-ai-max-495") &&
 			m.Protocol == NativeVulkanProtocol && m.OS == "linux" && m.Arch == "amd64" && m.Device == "Vulkan0"
 	if !validPlatform || !validPurpose || m.Samples != 3 || m.GeneratedTokens != 32 || m.PhysicalAcceptance || m.ThermalC != nil || !oneOf(m.SuiteID, "pack-v1", "thin-v1") || m.CatalogID == "" || !regexp.MustCompile(`^sha256:[a-f0-9]{64}$`).MatchString(m.FileHash) || !hashRE.MatchString(m.RuntimeSHA256) || !hashRE.MatchString(m.Hardware) || !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(m.CollectorCommit) || !regexp.MustCompile(`^sha256:[a-f0-9]{64}$`).MatchString(m.EnvironmentHash) || m.ContextTokens < 512 || m.ContextTokens > 131072 || m.SizeBytes <= 0 || m.SizeBytes > 512<<30 || math.IsNaN(m.DecodeTokS) || math.IsInf(m.DecodeTokS, 0) {
 		return fmt.Errorf("unsupported or incomplete native certificate manifest")

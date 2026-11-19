@@ -313,6 +313,15 @@ func TestNativeVulkanDepthProofMatchesStrixClass(t *testing.T) {
 			if err != nil || len(proof.Samples) != 3 || proof.Samples[0].Backend != "vulkan" {
 				t.Fatalf("Vulkan proof failed: %v", err)
 			}
+			lab := manifest
+			lab.ClassID, lab.HardwareClassID = "amd-halo-vulkan-lab", target.class
+			if _, err := nativeEvidence(report, lab); err != nil {
+				t.Fatalf("shared TEST catalog lost physical class binding: %v", err)
+			}
+			lab.HardwareClassID = ""
+			if _, err := nativeEvidence(report, lab); err == nil {
+				t.Fatal("shared TEST catalog accepted without a physical class")
+			}
 			if manifest.ClassID == "amd-ryzen-ai-max-395" {
 				manifest.ClassID = "amd-ryzen-ai-max-495"
 			} else {
