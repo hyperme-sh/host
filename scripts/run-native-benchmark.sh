@@ -8,8 +8,8 @@ if [ "$#" -ne 7 ]; then
     exit 2
 fi
 
-collector=$1 archive=$2 archive_sha=$3 model=$4 model_sha=$5 state=$6 evidence=$7
-for path in "$collector" "$archive" "$model" "$state" "$evidence"; do
+collector=$1 archive=$2 archive_sha=$3 model=$4 model_sha=$5 state=$6 artifacts=$7
+for path in "$collector" "$archive" "$model" "$state" "$artifacts"; do
     case "$path" in
         /*) ;;
         *) echo "Use absolute paths for benchmark inputs and output" >&2; exit 2 ;;
@@ -42,8 +42,8 @@ fi
 sha256() {
     shasum -a 256 < "$1" | cut -d ' ' -f 1
 }
-mkdir -p "$evidence"
-runtime=$(mktemp -d "$evidence/runtime.XXXXXXXX")
+mkdir -p "$artifacts"
+runtime=$(mktemp -d "$artifacts/runtime.XXXXXXXX")
 cp "$archive" "$runtime/release.tar.gz"
 if [ "$(sha256 "$runtime/release.tar.gz")" != "$archive_sha" ]; then
     echo "Runtime archive digest does not match the reviewed pin" >&2
@@ -63,4 +63,4 @@ fi
     --model-file "$model" --model-sha256 "$model_sha" \
     --runtime-file "$bench" --runtime-sha256 "$(sha256 "$bench")" \
     --backend "$backend" --device "$device" --context-tokens 16384 \
-    --generated-tokens 32 --samples 3 --state-dir "$state" --artifact-dir "$evidence"
+    --generated-tokens 32 --samples 3 --state-dir "$state" --artifact-dir "$artifacts"

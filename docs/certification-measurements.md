@@ -102,14 +102,14 @@ and explicitly select the intended device. Neither path installs packages or
 starts services.
 
 Use a private working directory and verify that the host is idle and excluded
-from scheduling throughout the run. Keep the collector, model and evidence
+from scheduling throughout the run. Keep the collector, model and artifacts
 directory under your control. For comparable results, use the same GGUF and
 llama.cpp revision on all hosts:
 
 ```sh
 ./scripts/run-native-benchmark.sh \
   /private/bench/hypermesh-deploy /private/bench/llama-release.tar.gz ARCHIVE_SHA256 \
-  /private/bench/model.gguf MODEL_SHA256 /var/lib/hypermesh /private/bench/evidence
+  /private/bench/model.gguf MODEL_SHA256 /var/lib/hypermesh /private/bench/artifacts
 ```
 
 Pass the actual agent state directory, including for a separate production
