@@ -83,18 +83,18 @@ jobs:
           fi
           printf 'RELEASE_SOURCE_SHA=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
-      # GITHUB_TOKEN cannot create historical tags whose workflows differ
-      # from main. Only explicit test-only dispatches use this scoped App.
+      # A queued main push can become historical before publication. Use the
+      # same repository-scoped App as an explicit TEST replay for its archive.
       - name: Require test release App configuration
         env:
-          TEST_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.test_only }}
+          TEST_ARCHIVE_APP_REQUIRED: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.test_only)) }}
           TEST_RELEASE_APP_ID: ${{ vars.HYPERMESH_TEST_RELEASE_APP_ID }}
           TEST_RELEASE_APP_KEY_CONFIGURED: ${{ secrets.HYPERMESH_TEST_RELEASE_APP_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
-          if [ "$TEST_ONLY" = true ]; then
-            if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$GITHUB_REF" != refs/heads/main ]; then
-              echo 'Test release App is restricted to explicit main test-only dispatches' >&2
+          if [ "$TEST_ARCHIVE_APP_REQUIRED" = true ]; then
+            if [ "$GITHUB_REF" != refs/heads/main ] || { [ "$GITHUB_EVENT_NAME" != push ] && [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; }; then
+              echo 'Test release App is restricted to main TEST publications' >&2
               exit 1
             fi
             if [ -z "$TEST_RELEASE_APP_ID" ] || [ "$TEST_RELEASE_APP_KEY_CONFIGURED" != true ]; then
@@ -104,7 +104,7 @@ jobs:
           fi
 
       - name: Create scoped test release token
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.test_only
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.test_only))
         id: test-release-token
         # actions/create-github-app-token v3, automatically revoked in post.
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
@@ -218,7 +218,7 @@ jobs:
           channel: ${{ env.channel }}
           # Do not fall back to GITHUB_TOKEN if App token creation failed.
           GH_TOKEN: ${{ github.token }}
-          TEST_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.test_only }}
+          TEST_ARCHIVE_APP_REQUIRED: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.test_only)) }}
           TEST_RELEASE_TOKEN: ${{ steps.test-release-token.outputs.token }}
           AZURE_STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT }}
           AZURE_STORAGE_CONTAINER: ${{ vars.AZURE_STORAGE_CONTAINER }}
@@ -234,7 +234,7 @@ jobs:
               exit 1
               ;;
           esac
-          if [ "$TEST_ONLY" = true ]; then
+          if [ "$TEST_ARCHIVE_APP_REQUIRED" = true ]; then
             if [ "$channel" != test ]; then
               echo 'Test release App cannot publish a production channel' >&2
               exit 1
