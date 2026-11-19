@@ -292,7 +292,24 @@ func buildSetupPlan(ctx context.Context, p Plan, requested, wireguardMode string
 		}
 	}
 	if result.Profile != nil && installed != nil {
-		result.Packages, err = resolveSetupPackages(ctx, source, installed, result.Profile.RequiredPackages, normalizedSetupArch(p.Hardware.Facts.Arch))
+		arch := normalizedSetupArch(p.Hardware.Facts.Arch)
+		required := result.Profile.RequiredPackages
+		hasDocker := hasNativePackage(installed, "docker.io", arch) || hasNativePackage(installed, "docker-ce", arch)
+		if haloSetup(p) {
+			if headless || wireguardMode != "kernel" {
+				fail("Halo TEST setup requires kernel WireGuard and preserves the current boot target")
+			}
+			if !hasDocker {
+				if err := dockerServiceAbsent(ctx, source); err != nil {
+					fail(err.Error())
+				} else {
+					required = append(append([]string{}, required...), "docker.io")
+				}
+			}
+		} else if !hasDocker {
+			fail("Docker engine is not installed through a recognized package; install the profile-compatible engine and rerun planning")
+		}
+		result.Packages, err = resolveSetupPackages(ctx, source, installed, required, arch)
 		if err != nil { fail(err.Error()); result.Packages = []PackageChange{} }
 		if len(result.Packages) > 0 {
 			argv := setupInstallArgv(result.Packages)
@@ -315,11 +332,6 @@ func buildSetupPlan(ctx context.Context, p Plan, requested, wireguardMode string
 			}
 		}
 		if !vendorKnown { fail("vendor runtime package version is unknown; use a package-managed vendor stack before planning") }
-		// Do not silently replace an existing Docker distribution or configure
-		// the vendor container runtime using a generic distro package.
-		if !hasNativePackage(installed, "docker.io", normalizedSetupArch(p.Hardware.Facts.Arch)) && !hasNativePackage(installed, "docker-ce", normalizedSetupArch(p.Hardware.Facts.Arch)) {
-			fail("Docker engine is not installed through a recognized package; install the profile-compatible engine and rerun planning")
-		}
 	}
 	if headless && result.Platform.DefaultTarget == "graphical.target" {
 		result.Changes = append(result.Changes, SetupChange{"headless-next-boot", "boot-target", false,

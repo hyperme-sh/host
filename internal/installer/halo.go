@@ -1,7 +1,10 @@
 package installer
 
 import (
+	"context"
+	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/FyberLabs/hypermesh-host/internal/hardware"
 )
@@ -21,4 +24,12 @@ func haloSetup(p Plan) bool {
 	return p.Hardware.Backend == "vulkan" && haloHardware(p.Hardware.Facts, r.SystemBytes) &&
 		p.Resources.MemoryMode == haloMemoryMode && r.UMA && r.UMAAllocationBytes == 0 &&
 		validUMARuntime(r.UMARuntime) && r.UMARuntime.Backend == "vulkan"
+}
+
+func dockerServiceAbsent(ctx context.Context, source setupSource) error {
+	raw, err := source.output(ctx, "systemctl", "show", "docker.service", "-p", "LoadState", "--value")
+	if err != nil || strings.TrimSpace(string(raw)) != "not-found" {
+		return fmt.Errorf("cannot rule out an existing unmanaged Docker service")
+	}
+	return nil
 }

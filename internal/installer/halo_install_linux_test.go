@@ -104,3 +104,53 @@ func TestHaloVulkanPlanWithROCmInstalled(t *testing.T) {
 		t.Fatalf("Halo Vulkan plan failed: code=%d err=%v blockers=%v %s", code, err, plan.Blockers, diagnostics.String())
 	}
 }
+
+func TestHaloSetupPlansDockerAndWireGuard(t *testing.T) {
+	p, source := setupFixture()
+	p.Hardware = hardware.Recommend(hardware.Facts{
+		Arch: "amd64", Processor: "AMD Ryzen AI Max+ PRO 495", Vulkan: true,
+	})
+	r := &p.Resources.Resources
+	r.SystemBytes, r.UMAAllocationBytes = 192*GiB, 0
+	r.UMARuntime.Backend = "vulkan"
+	p.Resources.MemoryMode = haloMemoryMode
+	p.Resources.Admission = CheckResources(*r)
+	existing := "mesa-vulkan-drivers:amd64\t26.0\tii \n" +
+		"iproute2\t1\tii \niputils-ping\t1\tii \nca-certificates\t1\tii \ngnupg\t1\tii \npython3\t1\tii \n"
+	serviceState := "not-found"
+	var simulations int
+	source.Output = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		switch name {
+		case "systemctl":
+			if args[0] == "show" {
+				return []byte(serviceState), nil
+			}
+			return []byte("graphical.target"), nil
+		case "dpkg-query":
+			return []byte(existing), nil
+		case "apt-cache":
+			return []byte("Candidate: 1\n"), nil
+		case "apt-get":
+			simulations++
+			return []byte("Inst containerd (1 Ubuntu [amd64])\nInst docker.io (1 Ubuntu [amd64])\n" +
+				"Inst wireguard-tools (1 Ubuntu [amd64])\nConf containerd (1 Ubuntu [amd64])\n" +
+				"Conf docker.io (1 Ubuntu [amd64])\nConf wireguard-tools (1 Ubuntu [amd64])\n"), nil
+		default:
+			t.Fatalf("unexpected setup command %s", name)
+			return nil, nil
+		}
+	}
+	plan := buildSetupPlan(context.Background(), p, "auto", "kernel", false, source)
+	if !plan.Reviewable || len(plan.Packages) != 3 || len(plan.Changes) != 1 || simulations != 2 {
+		t.Fatalf("missing pinned Halo prerequisite transaction: %+v", plan)
+	}
+	for _, value := range []string{"docker.io=1", "containerd=1", "wireguard-tools=1"} {
+		if !strings.Contains(strings.Join(plan.Changes[0].Argv, " "), value) {
+			t.Fatalf("setup did not pin %s", value)
+		}
+	}
+	serviceState = "loaded"
+	if buildSetupPlan(context.Background(), p, "auto", "kernel", false, source).Reviewable {
+		t.Fatal("setup accepted an unmanaged Docker service")
+	}
+}
