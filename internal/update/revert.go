@@ -112,7 +112,7 @@ func Revert(ctx context.Context, cfg Config, target string, h Hooks) (Plan, erro
 		return Plan{Action: ActionDefer}, nil
 	}
 	// Keep the rejected forward build out of the automatic channel after restart.
-	if err := WriteBadBuild(filepath.Join(filepath.Dir(cfg.MarkerPath), BadName), cfg.CurrentBuild, ""); err != nil {
+	if err := WriteBadBuild(filepath.Join(filepath.Dir(cfg.MarkerPath), BadName), max(cfg.CurrentBuild, cfg.BadBuild), ""); err != nil {
 		return Plan{}, err
 	}
 	install := h.Install

@@ -12,7 +12,7 @@ import (
 )
 
 func TestRevertOnlyRetainedSignedTarget(t *testing.T) {
-	for _, scenario := range []string{"ok", "legacy-control", "signature", "channel", "missing", "tampered", "busy", "restart", "bad", "newer"} {
+	for _, scenario := range []string{"ok", "higher-bad-build", "legacy-control", "signature", "channel", "missing", "tampered", "busy", "restart", "bad", "newer"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := t.TempDir()
 			proof := evidenceFixture()
@@ -39,6 +39,8 @@ func TestRevertOnlyRetainedSignedTarget(t *testing.T) {
 			restarted := false
 			hooks := Hooks{Verify: func([]byte, []byte, []byte) error { return nil }, Restart: func(context.Context) error { restarted = true; return nil }}
 			switch scenario {
+			case "higher-bad-build":
+				cfg.BadBuild = 32
 			case "signature":
 				hooks.Verify = func([]byte, []byte, []byte) error { return fmt.Errorf("bad signature") }
 			case "channel":
@@ -58,11 +60,11 @@ func TestRevertOnlyRetainedSignedTarget(t *testing.T) {
 			}
 			plan, err := Revert(context.Background(), cfg, proof.SHA256, hooks)
 			data, _ := os.ReadFile(cfg.BinaryPath)
-			if scenario == "ok" {
+			if scenario == "ok" || scenario == "higher-bad-build" {
 				if err != nil || !restarted || plan.Action != ActionInstall || string(data) != "agent" {
 					t.Fatalf("%+v %v %q", plan, err, data)
 				}
-				if bad, err := ReadBadBuild(filepath.Join(dir, BadName)); err != nil || bad != 31 {
+				if bad, err := ReadBadBuild(filepath.Join(dir, BadName)); err != nil || bad != max(cfg.CurrentBuild, cfg.BadBuild) {
 					t.Fatal("forward update could reinstall reverted build")
 				}
 			} else {
