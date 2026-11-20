@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -75,10 +76,12 @@ func (a *Agent) startUpdateWatch(ctx context.Context) {
 	})
 }
 
+var errUpdateDeferred = errors.New("update deferred while busy")
+
 func (a *Agent) maybeSelfUpdate(ctx context.Context) {
 	a.maintenanceMu.Lock()
 	defer a.maintenanceMu.Unlock()
-	if a.maintenanceHeld() {
+	if a.Busy() {
 		return
 	}
 	if strings.TrimSpace(a.cfg.UpdateChannel) == "" {
@@ -88,17 +91,41 @@ func (a *Agent) maybeSelfUpdate(ctx context.Context) {
 	if every <= 0 {
 		every = time.Hour
 	}
-	if !a.lastUpdateCheck.IsZero() && time.Since(a.lastUpdateCheck) < every {
+	now := a.clock()
+	if !a.nextUpdateRetry.IsZero() {
+		if now.Before(a.nextUpdateRetry) {
+			return
+		}
+	} else if !a.lastUpdateCheck.IsZero() && now.Sub(a.lastUpdateCheck) < every {
 		return
 	}
-	a.lastUpdateCheck = time.Now()
 	fn := a.selfUpdate
 	if fn == nil {
 		fn = a.defaultSelfUpdate
 	}
-	if err := fn(ctx, a.Busy()); err != nil {
-		a.log.Warn("update check failed", "err", update.RedactQuery(err.Error()))
+	err := fn(ctx, false)
+	if errors.Is(err, errUpdateDeferred) {
+		// A lease or result became pending during verification. The next idle
+		// job tick should retry instead of consuming the hourly interval.
+		a.nextUpdateRetry = now
+		return
 	}
+	if err != nil {
+		a.updateFailures++
+		delay := 15 * time.Second
+		for n := 1; n < a.updateFailures && delay < 5*time.Minute; n++ {
+			delay *= 2
+		}
+		if delay > 5*time.Minute {
+			delay = 5 * time.Minute
+		}
+		a.nextUpdateRetry = now.Add(delay)
+		a.log.Warn("update check failed", "err", update.RedactQuery(err.Error()), "retry_after", delay)
+		return
+	}
+	a.lastUpdateCheck = now
+	a.nextUpdateRetry = time.Time{}
+	a.updateFailures = 0
 }
 
 func (a *Agent) defaultSelfUpdate(ctx context.Context, busy bool) error {
@@ -145,6 +172,9 @@ func (a *Agent) defaultSelfUpdate(ctx context.Context, busy bool) error {
 		return err
 	}
 	logUpdate(a.log, plan)
+	if plan.Action == update.ActionDefer {
+		return errUpdateDeferred
+	}
 	return nil
 }
 
