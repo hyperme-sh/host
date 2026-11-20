@@ -321,7 +321,7 @@ func Watch(ctx context.Context, cfg WatchConfig) {
 				if cfg.Log != nil {
 					cfg.Log("update rollback failed", "err", err)
 				}
-				return true
+				return false
 			}
 			badPath := filepathDir(cfg.MarkerPath) + "/" + BadName
 			if err := WriteBadBuild(badPath, m.Build, m.ReleaseID); err != nil {

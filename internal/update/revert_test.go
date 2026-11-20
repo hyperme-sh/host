@@ -123,3 +123,27 @@ func TestFailedRevertStartupPreservesHigherBadBuild(t *testing.T) {
 		})
 	}
 }
+
+func TestStartupWatchRetriesTransientRollbackFailure(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, MarkerName)
+	if err := WriteMarker(marker, Marker{Binary: filepath.Join(dir, "agent"), Backup: filepath.Join(dir, "backup"), Version: "0.0.2", Build: 2, Deadline: time.Unix(1, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	calls, exit := 0, false
+	Watch(ctx, WatchConfig{MarkerPath: marker, Interval: time.Millisecond, HeartbeatOK: func() uint64 { return 0 }, Now: func() time.Time { return time.Unix(2, 0) }, Rollback: func() error {
+		calls++
+		if calls == 1 {
+			return fmt.Errorf("transient restore failure")
+		}
+		return nil
+	}, Exit: func(int) { exit = true }})
+	if calls != 2 || !exit {
+		t.Fatalf("calls=%d exit=%v", calls, exit)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("successful recovery retained marker")
+	}
+}
