@@ -119,6 +119,10 @@ func (a *Agent) maybeSelfUpdate(ctx context.Context) {
 		if delay > 5*time.Minute {
 			delay = 5 * time.Minute
 		}
+		var status *api.StatusError
+		if errors.As(err, &status) && status.HasRetryAfter && status.RetryAfter > delay {
+			delay = status.RetryAfter
+		}
 		a.nextUpdateRetry = now.Add(delay)
 		a.log.Warn("update check failed", "err", update.RedactQuery(err.Error()), "retry_after", delay)
 		return

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/FyberLabs/hypermesh-host/internal/api"
 	"github.com/FyberLabs/hypermesh-host/internal/runtime"
 	"github.com/FyberLabs/hypermesh-host/internal/update"
 )
@@ -219,5 +220,24 @@ func TestMaybeSelfUpdateRetryCapAndLateBusyDeferral(t *testing.T) {
 	a.maybeSelfUpdate(context.Background())
 	if !a.nextUpdateRetry.IsZero() {
 		t.Fatal("idle retry did not recover")
+	}
+}
+
+func TestMaybeSelfUpdateRespectsOwnerRetryAfter(t *testing.T) {
+	now := time.Unix(10000, 0)
+	a := &Agent{cfg: Config{UpdateChannel: "test"}, now: func() time.Time { return now }, log: discardLog()}
+	calls := 0
+	a.selfUpdate = func(context.Context, bool) error {
+		calls++
+		return &api.StatusError{StatusCode: 429, HasRetryAfter: true, RetryAfter: 10 * time.Minute}
+	}
+	a.maybeSelfUpdate(context.Background())
+	if a.nextUpdateRetry != now.Add(10*time.Minute) {
+		t.Fatal("owner retry deadline ignored")
+	}
+	now = now.Add(5 * time.Minute)
+	a.maybeSelfUpdate(context.Background())
+	if calls != 1 {
+		t.Fatal("retried during owner hold")
 	}
 }
