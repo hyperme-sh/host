@@ -1,6 +1,6 @@
 # Remote software recovery
 
-The host owner can request an immediate check or a revert through Plane:
+The host owner can request an immediate check or a revert for a Linux host through Plane:
 
 `POST /api/v1/hypermesh/devices/{device_id}/software`
 
@@ -18,13 +18,14 @@ Use the existing tenant and host-owner authentication, with this JSON body:
 
 The target is a binary selection for this operation. It does not pin a running
 service or change the TEST channel. An update must match the current signed
-channel candidate. A revert must match a retained, signed older binary in the
+channel candidate and declare software-control protocol 1. A revert must match a retained, signed older binary in the
 same channel whose signed metadata declares software-control protocol 1. Older
 binaries remain eligible for startup rollback, but cannot be selected for a remote
 revert because they cannot reconcile remote commands. Neither operation accepts a download URL or changes OS packages.
 
 The host checks the control endpoint on its job tick while idle. It defers while
-a lease, unacknowledged result, or maintenance hold exists. It saves the command
+a lease, unacknowledged workload result, or maintenance hold exists. Retrying a
+completed software-result upload does not block workloads. It saves the command
 before changing files and reconciles it after restart. Transport and activation
 failures that restore the previous executable retry with a bounded delay until
 expiry. A restored process reports a failed activation; a healthy target process
