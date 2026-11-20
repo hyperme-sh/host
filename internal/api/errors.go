@@ -96,7 +96,7 @@ func mapStatus(method, path string, code int, payload []byte, hdr http.Header) e
 	}
 	// The updates route is not an unknown-device lookup. A 404 body must
 	// not be copied: it can echo a SAS URL.
-	if strings.HasPrefix(path, Prefix+"/agent/updates/") && code == http.StatusNotFound {
+	if (strings.HasPrefix(path, Prefix+"/agent/updates/") || strings.HasPrefix(path, Prefix+"/agent/software")) && code == http.StatusNotFound {
 		return &StatusError{Method: method, Path: path, StatusCode: code}
 	}
 	switch code {

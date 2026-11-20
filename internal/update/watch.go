@@ -178,6 +178,13 @@ func WriteBadBuild(path string, build int, releaseID string) error {
 	if releaseID != "" && !releaseIDOK(releaseID) {
 		return fmt.Errorf("%w: update-bad release", ErrRejected)
 	}
+	previous, err := ReadBadBuild(path)
+	if err != nil {
+		return err
+	}
+	if previous >= build {
+		return nil
+	}
 	body := fmt.Sprintf("build=%d\nrelease_id=%s\n", build, releaseID)
 	return writeAtomic(path, body)
 }
@@ -286,6 +293,7 @@ func Watch(ctx context.Context, cfg WatchConfig) {
 	if interval <= 0 {
 		interval = time.Second
 	}
+	rollingBack := false
 	act := func() bool {
 		m, err := ReadMarker(cfg.MarkerPath)
 		if err != nil {
@@ -294,7 +302,11 @@ func Watch(ctx context.Context, cfg WatchConfig) {
 			}
 			return true
 		}
-		switch Evaluate(m, cfg.Now(), cfg.HeartbeatOK(), cfg.Baseline) {
+		action := Evaluate(m, cfg.Now(), cfg.HeartbeatOK(), cfg.Baseline)
+		if rollingBack && m != nil {
+			action = WatchRollback
+		}
+		switch action {
 		case WatchNone:
 			return true
 		case WatchConfirm:
@@ -307,6 +319,7 @@ func Watch(ctx context.Context, cfg WatchConfig) {
 			}
 			return true
 		case WatchRollback:
+			rollingBack = true
 			if cfg.Rollback == nil {
 				return true
 			}
@@ -314,7 +327,7 @@ func Watch(ctx context.Context, cfg WatchConfig) {
 				if cfg.Log != nil {
 					cfg.Log("update rollback failed", "err", err)
 				}
-				return true
+				return false
 			}
 			badPath := filepathDir(cfg.MarkerPath) + "/" + BadName
 			if err := WriteBadBuild(badPath, m.Build, m.ReleaseID); err != nil {

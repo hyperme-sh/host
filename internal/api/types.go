@@ -142,7 +142,10 @@ type HostHealth struct {
 	ModelCacheAvailableBytes *int64   `json:"model_cache_available_bytes,omitempty"`
 	ModelCacheBytes          *int64   `json:"model_cache_bytes,omitempty"`
 	ModelCacheEvictableBytes *int64   `json:"model_cache_evictable_bytes,omitempty"`
-	BuildCommit              string   `json:"build_commit,omitempty"`
+	BuildVersion string `json:"build_version,omitempty"`
+ BuildNumber int `json:"build_number,omitempty"`
+ BuildChannel string `json:"build_channel,omitempty"`
+ BuildCommit              string   `json:"build_commit,omitempty"`
 	// HostType is model or supervisor. The agent always sets it so a
 	// supervisor is not offered as a normal device.
 	HostType string `json:"host_type,omitempty"`
