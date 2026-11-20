@@ -62,7 +62,7 @@ func (e *DecodeError) Unwrap() error { return e.Err }
 
 // StatusError is an unexpected HTTP status. Response bodies are not kept
 // (they may echo tokens or keys).
-// HasRetryAfter is set only for 503 when the Retry-After header parsed.
+// HasRetryAfter is set for 429 and 503 when the Retry-After header parsed.
 // RetryAfter is the delay the header asked for, before the caller clamps it.
 type StatusError struct {
 	Method        string
@@ -116,7 +116,7 @@ func mapStatus(method, path string, code int, payload []byte, hdr http.Header) e
 
 func statusErr(method, path string, code int, hdr http.Header) *StatusError {
 	se := &StatusError{Method: method, Path: path, StatusCode: code}
-	if code != http.StatusServiceUnavailable || hdr == nil {
+	if (code != http.StatusServiceUnavailable && code != http.StatusTooManyRequests) || hdr == nil {
 		return se
 	}
 	d, ok := parseRetryAfter(hdr.Get("Retry-After"), time.Now())

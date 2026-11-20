@@ -3,12 +3,14 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/FyberLabs/hypermesh-host/internal/api"
 	"github.com/FyberLabs/hypermesh-host/internal/runtime"
 	"github.com/FyberLabs/hypermesh-host/internal/update"
 )
@@ -78,7 +80,7 @@ func funcBody(t *testing.T, text, sig string) string {
 	return rest[:next]
 }
 
-func TestMaybeSelfUpdatePassesBusy(t *testing.T) {
+func TestMaybeSelfUpdateDoesNotConsumeIntervalWhileBusy(t *testing.T) {
 	a := &Agent{cfg: Config{
 		UpdateChannel: "test",
 		UpdateEvery:   time.Hour,
@@ -95,8 +97,14 @@ func TestMaybeSelfUpdatePassesBusy(t *testing.T) {
 	a.log = discardLog()
 	a.maybeSelfUpdate(context.Background())
 	a.maybeSelfUpdate(context.Background())
-	if calls != 1 || !sawBusy {
-		t.Fatalf("calls %d busy %v", calls, sawBusy)
+	if calls != 0 {
+		t.Fatalf("busy agent checked channel %d times", calls)
+	}
+	a.lease = nil
+	a.maybeSelfUpdate(context.Background())
+	a.maybeSelfUpdate(context.Background())
+	if calls != 1 || sawBusy {
+		t.Fatalf("idle calls %d busy %v", calls, sawBusy)
 	}
 }
 
@@ -148,5 +156,121 @@ func TestUpdateFingerprintsFromEnv(t *testing.T) {
 	got = FromEnv()
 	if err := got.Validate(); err == nil || !strings.Contains(err.Error(), "FINGERPRINTS") {
 		t.Fatal(err)
+	}
+}
+
+func TestMaybeSelfUpdateRetriesTransientFailuresBeforeHourlyCheck(t *testing.T) {
+	now := time.Unix(10000, 0)
+	a := &Agent{cfg: Config{UpdateChannel: "test", UpdateEvery: time.Hour}, now: func() time.Time { return now }, log: discardLog()}
+	calls := 0
+	a.selfUpdate = func(context.Context, bool) error {
+		calls++
+		if calls <= 2 {
+			return errors.New("temporary transport failure")
+		}
+		return nil
+	}
+	a.maybeSelfUpdate(context.Background())
+	if a.nextUpdateRetry != now.Add(15*time.Second) || !a.lastUpdateCheck.IsZero() {
+		t.Fatal("first failure consumed normal interval")
+	}
+	a.maybeSelfUpdate(context.Background())
+	if calls != 1 {
+		t.Fatal("retried before backoff")
+	}
+	now = now.Add(15 * time.Second)
+	a.maybeSelfUpdate(context.Background())
+	if a.nextUpdateRetry != now.Add(30*time.Second) {
+		t.Fatal("retry did not back off")
+	}
+	now = now.Add(30 * time.Second)
+	a.maybeSelfUpdate(context.Background())
+	if calls != 3 || !a.nextUpdateRetry.IsZero() || a.updateFailures != 0 {
+		t.Fatal("successful check did not clear retry state")
+	}
+	now = now.Add(time.Minute)
+	a.maybeSelfUpdate(context.Background())
+	if calls != 3 {
+		t.Fatal("successful channel check ignored hourly interval")
+	}
+	now = now.Add(time.Hour)
+	a.maybeSelfUpdate(context.Background())
+	if calls != 4 {
+		t.Fatal("normal check never resumed")
+	}
+}
+
+func TestMaybeSelfUpdateRetryCapAndLateBusyDeferral(t *testing.T) {
+	now := time.Unix(10000, 0)
+	a := &Agent{cfg: Config{UpdateChannel: "test"}, now: func() time.Time { return now }, log: discardLog()}
+	a.selfUpdate = func(context.Context, bool) error { return errors.New("offline") }
+	for n := 0; n < 20; n++ {
+		a.maybeSelfUpdate(context.Background())
+		if delay := a.nextUpdateRetry.Sub(now); delay > 5*time.Minute || delay < 15*time.Second {
+			t.Fatal(delay)
+		}
+		now = a.nextUpdateRetry
+	}
+	a.selfUpdate = func(context.Context, bool) error { return errUpdateDeferred }
+	a.maybeSelfUpdate(context.Background())
+	if a.nextUpdateRetry != now {
+		t.Fatal("late busy decision consumed hourly interval")
+	}
+	a.selfUpdate = func(context.Context, bool) error { return nil }
+	a.maybeSelfUpdate(context.Background())
+	if !a.nextUpdateRetry.IsZero() {
+		t.Fatal("idle retry did not recover")
+	}
+}
+
+func TestMaybeSelfUpdateRespectsOwnerRetryAfter(t *testing.T) {
+	now := time.Unix(10000, 0)
+	a := &Agent{cfg: Config{UpdateChannel: "test"}, now: func() time.Time { return now }, log: discardLog()}
+	calls := 0
+	a.selfUpdate = func(context.Context, bool) error {
+		calls++
+		return &api.StatusError{StatusCode: 429, HasRetryAfter: true, RetryAfter: 10 * time.Minute}
+	}
+	a.maybeSelfUpdate(context.Background())
+	if a.nextUpdateRetry != now.Add(10*time.Minute) {
+		t.Fatal("owner retry deadline ignored")
+	}
+	now = now.Add(5 * time.Minute)
+	a.maybeSelfUpdate(context.Background())
+	if calls != 1 {
+		t.Fatal("retried during owner hold")
+	}
+}
+
+func TestMaybeSelfUpdateBackoffStartsAfterSlowAttempt(t *testing.T) {
+	for _, hold := range []time.Duration{0, 10 * time.Minute} {
+		t.Run(hold.String(), func(t *testing.T) {
+			now := time.Unix(10000, 0)
+			a := &Agent{cfg: Config{UpdateChannel: "test"}, now: func() time.Time { return now }, log: discardLog()}
+			calls := 0
+			a.selfUpdate = func(context.Context, bool) error {
+				calls++
+				now = now.Add(2 * time.Minute)
+				return &api.StatusError{StatusCode: 503, HasRetryAfter: hold > 0, RetryAfter: hold}
+			}
+			a.maybeSelfUpdate(context.Background())
+			delay := 15 * time.Second
+			if hold > delay {
+				delay = hold
+			}
+			if got := a.nextUpdateRetry.Sub(now); got != delay {
+				t.Fatalf("remaining delay = %v, want %v", got, delay)
+			}
+			now = now.Add(delay - time.Nanosecond)
+			a.maybeSelfUpdate(context.Background())
+			if calls != 1 {
+				t.Fatal("retried before full delay elapsed")
+			}
+			now = now.Add(time.Nanosecond)
+			a.maybeSelfUpdate(context.Background())
+			if calls != 2 {
+				t.Fatal("did not retry after delay")
+			}
+		})
 	}
 }

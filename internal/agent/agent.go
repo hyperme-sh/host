@@ -170,6 +170,8 @@ type Agent struct {
 	pendingResult atomic.Bool
 	// lastUpdateCheck throttles the update channel. The job loop owns it.
 	lastUpdateCheck time.Time
+	nextUpdateRetry time.Time
+	updateFailures int
 	// selfUpdate overrides the update check. Nil uses the channel client.
 	// Tests set it. The job loop is the only caller.
 	selfUpdate func(ctx context.Context, busy bool) error

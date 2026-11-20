@@ -101,3 +101,10 @@ func TestRetryAfterIgnoredUnless503(t *testing.T) {
 		t.Fatalf("body leaked: %s", se.Error())
 	}
 }
+
+func TestRateLimitedUpdatePreservesRetryAfter(t *testing.T) {
+	got := statusErr("GET", "/api/v1/hypermesh/agent/updates/test", 429, http.Header{"Retry-After": []string{"600"}})
+	if !got.HasRetryAfter || got.RetryAfter != 600*time.Second {
+		t.Fatalf("%+v", got)
+	}
+}
