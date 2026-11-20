@@ -51,7 +51,7 @@ func (c *Client) qualification(ctx context.Context, r Request, device, secret, i
 	if err := c.request(ctx, "POST", "/api/v1/hypermesh/agent/onboarding/qualification/"+op, secret, body, &out); err != nil {
 		return out, err
 	}
-	if out.Purpose != "lab-qualification-v1" || out.Repetitions != 3 || out.ProtocolVersion != 1 || out.Nonce != nonce || out.RunID != id || out.TenantID != c.tenant || out.RequestID != r.RequestID || out.DeviceID != device || out.Manifest.ClassID != r.ClassID || out.Manifest.ValidateQualification() != nil || !hashRE.MatchString(out.ManifestSHA256) || !oneOf(out.State, "planned", "passed", "failed") || out.ExpiresAt.IsZero() || out.SellingAllowed == nil || *out.SellingAllowed || out.ActivationAllowed != nil {
+	if !c.validQualificationRun(out, r, device, nonce) || out.RunID != id {
 		return QualificationRun{}, fmt.Errorf("qualification response does not match this installation")
 	}
 	if previous != nil && (out.ManifestSHA256 != previous.ManifestSHA256 || !SameManifest(out.Manifest, previous.Manifest)) {
@@ -68,6 +68,34 @@ func (c *Client) qualification(ctx context.Context, r Request, device, secret, i
 	}
 	return out, nil
 }
+func (c *Client) validQualificationRun(out QualificationRun, r Request, device, nonce string) bool {
+	return !(out.Purpose != "lab-qualification-v1" || out.Repetitions != 3 || out.ProtocolVersion != 1 || out.Nonce != nonce || !UUID.MatchString(out.RunID) || out.TenantID != c.tenant || out.RequestID != r.RequestID || out.DeviceID != device || out.Manifest.ClassID != r.ClassID || out.Manifest.ValidateQualification() != nil || !hashRE.MatchString(out.ManifestSHA256) || !oneOf(out.State, "planned", "passed", "failed") || out.ExpiresAt.IsZero() || out.SellingAllowed == nil || *out.SellingAllowed || out.ActivationAllowed != nil)
+}
+
+// PendingQualification discovers an operator-authorized plan. It does not
+// claim the run or authorize concurrent execution.
+func (c *Client) PendingQualification(ctx context.Context, r Request, device, secret string) (*QualificationRun, error) {
+	if r.Validate() != nil || !UUID.MatchString(device) || !onboardingSecretRE.MatchString(secret) {
+		return nil, fmt.Errorf("invalid qualification identity")
+	}
+	var challenge [32]byte
+	if _, err := rand.Read(challenge[:]); err != nil {
+		return nil, err
+	}
+	nonce := hex.EncodeToString(challenge[:])
+	body := map[string]any{"protocol_version": 1, "nonce": nonce, "request_id": r.RequestID, "device_id": device}
+	var result struct {
+		Run *QualificationRun `json:"run"`
+	}
+	if err := c.request(ctx, "POST", "/api/v1/hypermesh/agent/onboarding/qualification/pending", secret, body, &result); err != nil {
+		return nil, err
+	}
+	if result.Run != nil && (!c.validQualificationRun(*result.Run, r, device, nonce) || result.Run.State != "planned") {
+		return nil, fmt.Errorf("pending qualification does not match this installation")
+	}
+	return result.Run, nil
+}
+
 func (c *Client) PlanQualification(ctx context.Context, r Request, device, secret, id string) (QualificationRun, error) {
 	return c.qualification(ctx, r, device, secret, id, nil, nil)
 }
