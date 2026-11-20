@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -202,5 +203,48 @@ func TestSoftwareRecoveryUsesPersistedDestinationInsteadOfExecutablePath(t *test
 	resolved, err := a.softwareBinary()
 	if err != nil || !filepath.IsAbs(resolved) || filepath.Base(resolved) != "relative-agent" {
 		t.Fatal("relative path not normalized", err)
+	}
+}
+
+func TestSoftwareDefaultDestinationSurvivesExecutableRename(t *testing.T) {
+	if os.Getenv("HM_UNIT_RENAMED_EXECUTABLE") != "1" {
+		raw, err := os.ReadFile("/proc/self/exe")
+		if err != nil {
+			t.Skip("Linux executable required")
+		}
+		path := filepath.Join(t.TempDir(), "agent-unit")
+		if err := os.WriteFile(path, raw, 0700); err != nil {
+			t.Fatal(err)
+		}
+		command := exec.Command(path, "-test.run=^TestSoftwareDefaultDestinationSurvivesExecutableRename$", "-test.count=1")
+		command.Env = append(os.Environ(), "HM_UNIT_RENAMED_EXECUTABLE=1")
+		if out, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("%s %v", out, err)
+		}
+		return
+	}
+	original, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	uptime := filepath.Join(dir, "uptime")
+	os.WriteFile(uptime, []byte("1 1\n"), 0600)
+	a := newTestAgent(t, "http://127.0.0.1:1", dir, uptime, "", "")
+	if err := os.Rename(original, original+".pre-old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(original, []byte("replacement"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := os.Executable()
+	if err != nil || renamed == original {
+		t.Fatal("rename fixture did not change executable path")
+	}
+	for i := 0; i < 2; i++ {
+		destination, err := a.softwareBinary()
+		if err != nil || destination != original {
+			t.Fatalf("destination=%q wanted=%q err=%v", destination, original, err)
+		}
 	}
 }

@@ -29,6 +29,8 @@ import (
 
 // Agent is the host process.
 type Agent struct {
+	// Captured before an update can rename the running executable.
+	installBinary string
 	trusted runtime.Starter
 	// certEndpoint is a test seam; production certification always uses loopback.
 	certContextTokens int // nonzero only for an explicitly approved full-context check
@@ -220,6 +222,8 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 	if log == nil {
 		log = logsafe.New()
 	}
+	installBinary, err := (&Agent{cfg: cfg}).softwareBinary()
+	if err != nil { return nil, err }
 	src := telem.Default()
 	wg := tunnel.NewRunnerMode(cfg.WGMode)
 	wg.Log = log
@@ -238,6 +242,7 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 	nvidia, hip, cpu := runtime.NewNVIDIA(), runtime.NewHIP(), runtime.NewCPU()
 	nvidia.Capture, hip.Capture, cpu.Capture = capture, capture, capture
 	return &Agent{
+		installBinary: installBinary,
 		cfg:    cfg,
 		client: machineAPIClient(cfg),
 		telem:  src,

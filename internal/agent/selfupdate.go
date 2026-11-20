@@ -139,17 +139,14 @@ func (a *Agent) defaultSelfUpdate(ctx context.Context, busy bool) error {
 }
 
 func (a *Agent) selectedSelfUpdate(ctx context.Context, busy bool, target string, revert bool, binary string) error {
+	var err error
 	if binary == "" {
-		binary = strings.TrimSpace(a.cfg.UpdateBinary)
-	}
-	if binary == "" {
-		p, err := os.Executable()
+		binary, err = a.softwareBinary()
 		if err != nil {
 			return err
 		}
-		binary = p
 	}
-	binary, err := filepath.Abs(binary)
+	binary, err = filepath.Abs(binary)
 	if err != nil {
 		return err
 	}

@@ -244,6 +244,9 @@ func (a *Agent) reconcileSoftware(ctx context.Context) (bool, error) {
 }
 
 func (a *Agent) softwareBinary() (string, error) {
+	if a.installBinary != "" {
+		return a.installBinary, nil
+	}
 	path := strings.TrimSpace(a.cfg.UpdateBinary)
 	if path == "" {
 		var err error
