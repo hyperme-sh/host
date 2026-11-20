@@ -346,9 +346,9 @@ func (a *Agent) jobTick(ctx context.Context) {
  a.syncAndRecord(ctx)
  controlled, err := a.reconcileSoftware(ctx)
  if err != nil { a.log.Warn("software request", "err", update.RedactQuery(err.Error())) }
- if controlled { return }
+ if controlled && a.softwareBlocksWork() { return }
  if err := a.pullAndRun(ctx); err != nil { a.log.Warn("job pull failed", "err", err) }
- a.maybeSelfUpdate(ctx)
+ if !controlled { a.maybeSelfUpdate(ctx) }
 }
 
 func (a *Agent) jobLoop(ctx context.Context) {

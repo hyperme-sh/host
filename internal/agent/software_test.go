@@ -84,6 +84,9 @@ func TestSoftwareReconcilesRestartAndRetriesResult(t *testing.T) {
 				if err == nil {
 					t.Fatal("lost transport failure")
 				}
+				if a.softwareBlocksWork() {
+					t.Fatal("result retry blocked workloads")
+				}
 				_, err = a.reconcileSoftware(context.Background())
 			}
 			if err != nil {
@@ -93,5 +96,28 @@ func TestSoftwareReconcilesRestartAndRetriesResult(t *testing.T) {
 				t.Fatal("acknowledged command journal remains")
 			}
 		})
+	}
+}
+
+func TestSoftwareKeepsRecoveryUntilDiskMatchesRunning(t *testing.T) {
+	running, err := update.FileSHA256("/proc/self/exe")
+	if err != nil {
+		t.Skip("Linux required")
+	}
+	dir := t.TempDir()
+	a := &Agent{cfg: Config{StateDir: dir, UpdateBinary: filepath.Join(dir, "missing", "agent")}, state: State{DeviceID: testDevice}, log: discardLog(), hbOK: 1}
+	state := softwareJournal{Started: true, Command: api.SoftwareCommand{RequestID: testJob, DeviceID: testDevice, Action: "update", ExpectedSHA256: running, TargetSHA256: strings.Repeat("b", 64), ExpiresAt: time.Now().Add(time.Hour)}}
+	path := filepath.Join(dir, "software-command.json")
+	if err := saveSoftware(path, state); err != nil {
+		t.Fatal(err)
+	}
+	held, err := a.reconcileSoftware(context.Background())
+	if err == nil || !held || !a.softwareBlocksWork() {
+		t.Fatal("incomplete disk restore was finalized")
+	}
+	var saved softwareJournal
+	raw, _ := os.ReadFile(path)
+	if json.Unmarshal(raw, &saved) != nil || saved.Result != nil {
+		t.Fatal("lost incomplete recovery")
 	}
 }

@@ -2,6 +2,8 @@ package update
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,10 +12,21 @@ import (
 )
 
 func TestRevertOnlyRetainedSignedTarget(t *testing.T) {
-	for _, scenario := range []string{"ok", "signature", "channel", "missing", "tampered", "busy", "restart", "bad", "newer"} {
+	for _, scenario := range []string{"ok", "legacy-control", "signature", "channel", "missing", "tampered", "busy", "restart", "bad", "newer"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := t.TempDir()
 			proof := evidenceFixture()
+			var manifest Manifest
+			if err := json.Unmarshal(proof.Manifest, &manifest); err != nil {
+				t.Fatal(err)
+			}
+			manifest.SoftwareControlProtocol = 1
+			if scenario == "legacy-control" {
+				manifest.SoftwareControlProtocol = 0
+			}
+			proof.Manifest, _ = json.Marshal(manifest)
+			mh, bh := sha256.Sum256(proof.Manifest), sha256.Sum256([]byte("agent"))
+			proof.Checksums = []byte(fmt.Sprintf("%x  release.json\n%x  %s\n", mh, bh, proof.Binary))
 			cfg := Config{Channel: "test", Arch: "arm64", CurrentBuild: 31, CurrentVersion: "0.0.31", BinaryPath: filepath.Join(dir, "agent"), PubKeyPath: filepath.Join(dir, "key"), MarkerPath: filepath.Join(dir, MarkerName)}
 			for path, data := range map[string]string{cfg.BinaryPath: "current", cfg.BinaryPath + ".pre-old": "agent", cfg.PubKeyPath: "key"} {
 				if err := os.WriteFile(path, []byte(data), 0700); err != nil {

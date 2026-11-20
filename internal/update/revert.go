@@ -53,6 +53,9 @@ func Revert(ctx context.Context, cfg Config, target string, h Hooks) (Plan, erro
 	if runtime.GOOS != "linux" || !sha256Hex(target) {
 		return Plan{}, ErrRejected
 	}
+	if err := ctx.Err(); err != nil {
+		return Plan{}, err
+	}
 	if cfg.Busy || (h.StillBusy != nil && h.StillBusy()) {
 		return Plan{Action: ActionDefer}, nil
 	}
@@ -76,7 +79,7 @@ func Revert(ctx context.Context, cfg Config, target string, h Hooks) (Plan, erro
 	if err != nil {
 		return Plan{}, err
 	}
-	if man.Build == cfg.BadBuild || man.Build >= cfg.CurrentBuild {
+	if man.SoftwareControlProtocol != 1 || man.Build == cfg.BadBuild || man.Build >= cfg.CurrentBuild {
 		return Plan{}, ErrRejected
 	}
 	paths, err := filepath.Glob(cfg.BinaryPath + ".pre-*")
@@ -101,6 +104,9 @@ func Revert(ctx context.Context, cfg Config, target string, h Hooks) (Plan, erro
 	}
 	if payload == nil {
 		return Plan{}, fmt.Errorf("signed rollback target is not retained")
+	}
+	if err := ctx.Err(); err != nil {
+		return Plan{}, err
 	}
 	if h.StillBusy != nil && h.StillBusy() {
 		return Plan{Action: ActionDefer}, nil
@@ -132,6 +138,9 @@ func Revert(ctx context.Context, cfg Config, target string, h Hooks) (Plan, erro
 	if err != nil {
 		return Plan{}, restore(err)
 	}
+	if err := ctx.Err(); err != nil {
+		return Plan{}, restore(err)
+	}
 	if h.StillBusy != nil && h.StillBusy() {
 		return Plan{}, restore(ErrRejected)
 	}
@@ -145,6 +154,9 @@ func Revert(ctx context.Context, cfg Config, target string, h Hooks) (Plan, erro
 	restart := h.Restart
 	if restart == nil {
 		restart = RestartAgent
+	}
+	if err := ctx.Err(); err != nil {
+		return Plan{}, restore(err)
 	}
 	if err := restart(ctx); err != nil {
 		return Plan{}, restore(err)

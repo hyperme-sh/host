@@ -28,6 +28,7 @@ type Plan struct {
 // Build is the publisher's rising integer. ReleaseID is the blob
 // directory name. The plane response does not have to repeat either.
 type Manifest struct {
+ SoftwareControlProtocol int `json:"software_control_protocol,omitempty"`
 	Channel   string `json:"channel"`
 	Version   string `json:"version"`
 	Commit    string `json:"commit"`

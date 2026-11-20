@@ -212,6 +212,7 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 			return Plan{}, err
 		}
 	}
+	if err := ctx.Err(); err != nil { return Plan{}, err }
 	backup, err := install(cfg.BinaryPath, bin, previous)
 	restore := func(cause error, removeMarker bool) error {
 		rb := h.Rollback
@@ -234,6 +235,7 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 		}
 		return Plan{}, err
 	}
+	if err := ctx.Err(); err != nil { return Plan{}, restore(err, false) }
 	// A lease can arrive while the binary is replaced. Do not restart
 	// over that job. Put the previous binary back and leave this
 	// process running.
@@ -261,6 +263,7 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 	if restart == nil {
 		restart = RestartAgent
 	}
+	if err := ctx.Err(); err != nil { return Plan{}, restore(err, true) }
 	if err := restart(ctx); err != nil {
 		return Plan{}, restore(err, true)
 	}

@@ -502,6 +502,23 @@ func TestTickVerificationAndBusy(t *testing.T) {
 		})
 	}
 
+
+ for _,phase:=range []string{"verification","installation"} {
+  t.Run("expiry during "+phase,func(t *testing.T){
+   ctx,cancel:=context.WithCancel(context.Background());defer cancel()
+   cfg:=base;cfg.MarkerPath=filepath.Join(t.TempDir(),MarkerName)
+   installed,restored,restarted:=false,false,false
+   _,err:=Tick(ctx,cfg,Hooks{Source:src,
+    Verify:func([]byte,[]byte,[]byte)error{if phase=="verification"{cancel()};return nil},
+    Install:func(dest string,_ []byte,_ string)(string,error){installed=true;cancel();return dest+".pre-old",nil},
+    Rollback:func(string,string)error{restored=true;return nil},
+    Restart:func(context.Context)error{restarted=true;return nil},
+   })
+   if err==nil||restarted{t.Fatal("expired operation activated")}
+   if installed!=(phase=="installation")||restored!=installed{t.Fatal("expired replacement not restored")}
+  })
+ }
+
 	t.Run("sas error is redacted", func(t *testing.T) {
 		const secret = "super-secret-sas"
 		leaky := planeSource(man, sums, []byte("sig"), manRaw, binName, bin)

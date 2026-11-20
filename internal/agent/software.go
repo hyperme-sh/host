@@ -116,6 +116,19 @@ func (a *Agent) reconcileSoftware(ctx context.Context) (bool, error) {
 			if a.heartbeatOK() == 0 {
 				return true, nil
 			}
+			disk, hashErr := update.FileSHA256(a.softwareBinary())
+			if hashErr != nil || disk != running {
+				if running != cmd.ExpectedSHA256 && running != cmd.TargetSHA256 {
+					return true, fmt.Errorf("running software differs from both command binaries")
+				}
+				if err := update.RollbackFile(a.softwareBinary(), "/proc/self/exe"); err != nil {
+					return true, fmt.Errorf("software restore remains incomplete: %w", err)
+				}
+				disk, hashErr = update.FileSHA256(a.softwareBinary())
+				if hashErr != nil || disk != running {
+					return true, fmt.Errorf("software restore verification failed")
+				}
+			}
 			if running == cmd.TargetSHA256 {
 				err = finish("applied", "healthy")
 			} else {
@@ -150,7 +163,9 @@ func (a *Agent) reconcileSoftware(ctx context.Context) (bool, error) {
 			if err := saveSoftware(path, state); err != nil {
 				return true, err
 			}
-			err := a.selectedSelfUpdate(ctx, false, cmd.TargetSHA256, cmd.Action == "revert")
+			operation, cancel := context.WithDeadline(ctx, cmd.ExpiresAt)
+			err := a.selectedSelfUpdate(operation, false, cmd.TargetSHA256, cmd.Action == "revert")
+			cancel()
 			if errors.Is(err, errUpdateDeferred) {
 				state.Started = false
 				return true, saveSoftware(path, state)
@@ -194,4 +209,17 @@ func (a *Agent) softwareBinary() string {
 	}
 	path, _ := os.Executable()
 	return path
+}
+
+// Completed result delivery may delay another software change, never workloads.
+func (a *Agent) softwareBlocksWork() bool {
+	raw, err := os.ReadFile(filepath.Join(a.cfg.StateDir, "software-command.json"))
+	if os.IsNotExist(err) {
+		return false
+	}
+	var state softwareJournal
+	if err != nil || len(raw) > 16384 || json.Unmarshal(raw, &state) != nil {
+		return true
+	}
+	return state.Started && state.Result == nil
 }

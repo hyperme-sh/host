@@ -51,7 +51,7 @@ func TestUpdateLoops(t *testing.T) {
 	if strings.Contains(heart, "maybeSelfUpdate") {
 		t.Fatal("heartbeat loop runs the self-update check")
 	}
-	if strings.Index(jobs, "maybeSelfUpdate") < 0 {
+	if !strings.Contains(jobs, "a.jobTick(ctx)") || !strings.Contains(funcBody(t, text, "func (a *Agent) jobTick"), "maybeSelfUpdate") {
 		t.Fatal("job loop does not check for a self-update")
 	}
 	if strings.Contains(jobs, "startUpdateWatch") {
