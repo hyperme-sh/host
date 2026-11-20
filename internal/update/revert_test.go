@@ -14,7 +14,7 @@ import (
 )
 
 func TestRevertOnlyRetainedSignedTarget(t *testing.T) {
-	for _, scenario := range []string{"ok", "higher-bad-build", "legacy-control", "signature", "channel", "missing", "tampered", "busy", "restart", "bad", "newer"} {
+	for _, scenario := range []string{"ok", "upper-channel", "empty-channel", "invalid-channel", "higher-bad-build", "legacy-control", "signature", "channel", "missing", "tampered", "busy", "restart", "bad", "newer"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := t.TempDir()
 			proof := evidenceFixture()
@@ -41,6 +41,12 @@ func TestRevertOnlyRetainedSignedTarget(t *testing.T) {
 			restarted := false
 			hooks := Hooks{Verify: func([]byte, []byte, []byte) error { return nil }, Restart: func(context.Context) error { restarted = true; return nil }}
 			switch scenario {
+			case "upper-channel":
+				cfg.Channel = " TEST "
+			case "empty-channel":
+				cfg.Channel = ""
+			case "invalid-channel":
+				cfg.Channel = "invalid"
 			case "higher-bad-build":
 				cfg.BadBuild = 32
 			case "signature":
@@ -62,7 +68,7 @@ func TestRevertOnlyRetainedSignedTarget(t *testing.T) {
 			}
 			plan, err := Revert(context.Background(), cfg, proof.SHA256, hooks)
 			data, _ := os.ReadFile(cfg.BinaryPath)
-			if scenario == "ok" || scenario == "higher-bad-build" {
+			if scenario == "ok" || scenario == "upper-channel" || scenario == "higher-bad-build" {
 				if err != nil || !restarted || plan.Action != ActionInstall || string(data) != "agent" {
 					t.Fatalf("%+v %v %q", plan, err, data)
 				}

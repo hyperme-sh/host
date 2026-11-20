@@ -53,6 +53,11 @@ func Revert(ctx context.Context, cfg Config, target string, h Hooks) (Plan, erro
 	if runtime.GOOS != "linux" || !sha256Hex(target) {
 		return Plan{}, ErrRejected
 	}
+	channel, err := ParseChannel(cfg.Channel)
+	if err != nil || channel == "" {
+		return Plan{Action: ActionReject, Reason: "revert requires a configured channel"}, ErrRejected
+	}
+	cfg.Channel = channel
 	if err := ctx.Err(); err != nil {
 		return Plan{}, err
 	}
