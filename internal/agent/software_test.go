@@ -121,3 +121,55 @@ func TestSoftwareKeepsRecoveryUntilDiskMatchesRunning(t *testing.T) {
 		t.Fatal("lost incomplete recovery")
 	}
 }
+
+func TestSoftwareRetriesExpiredMarkerRecoveryInOriginalProcess(t *testing.T) {
+	running, err := update.FileSHA256("/proc/self/exe")
+	if err != nil {
+		t.Skip("Linux executable required")
+	}
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "initially-missing", "agent")
+	journal := softwareJournal{Started: true, Command: api.SoftwareCommand{RequestID: testJob, DeviceID: testDevice, Action: "update", ExpectedSHA256: running, TargetSHA256: strings.Repeat("b", 64), ExpiresAt: time.Now().Add(-time.Minute)}}
+	posts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posts++
+		var body api.SoftwareResult
+		json.NewDecoder(r.Body).Decode(&body)
+		if body.Reason != "rolled-back" || body.RunningSHA256 != running {
+			t.Errorf("%+v", body)
+		}
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+	a := &Agent{cfg: Config{StateDir: dir, UpdateBinary: binary}, state: State{DeviceID: testDevice}, client: api.NewClient(server.URL, testTenant), hbOK: 1}
+	a.client.DeviceSecret = testSecret
+	path := filepath.Join(dir, "software-command.json")
+	if err := saveSoftware(path, journal); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dir, update.MarkerName)
+	if err := update.WriteMarker(marker, update.Marker{Binary: binary, Backup: binary + ".pre-old", Version: "0.0.2", Build: 2, Deadline: time.Now().Add(-time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.reconcileSoftware(context.Background()); err == nil || posts != 0 || !a.softwareBlocksWork() {
+		t.Fatal("failed recovery lost its state")
+	}
+	if err := os.Mkdir(filepath.Dir(binary), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.reconcileSoftware(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if posts != 1 {
+		t.Fatal("recovered result not acknowledged")
+	}
+	if disk, err := update.FileSHA256(binary); err != nil || disk != running {
+		t.Fatal("restored bytes differ")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("recovered marker retained")
+	}
+	if a.softwareBlocksWork() {
+		t.Fatal("recovered command still blocks work")
+	}
+}

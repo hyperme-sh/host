@@ -111,7 +111,27 @@ func (a *Agent) reconcileSoftware(ctx context.Context) (bool, error) {
 				return true, err
 			}
 			if marker != nil {
-				return true, nil
+				// The original process has no startup watcher for a marker
+				// created later. Recover an expired activation here; the target
+				// process retains its own startup confirmation window.
+				if running != cmd.ExpectedSHA256 || a.clock().Before(marker.Deadline) {
+					return true, nil
+				}
+				if marker.Binary != a.softwareBinary() {
+					return true, fmt.Errorf("software recovery marker names another binary")
+				}
+				if err := update.RollbackFile(marker.Binary, "/proc/self/exe"); err != nil {
+					return true, fmt.Errorf("software marker recovery remains incomplete: %w", err)
+				}
+				if disk, err := update.FileSHA256(marker.Binary); err != nil || disk != running {
+					return true, fmt.Errorf("software marker recovery verification failed")
+				}
+				if err := update.WriteBadBuild(filepath.Join(a.cfg.StateDir, update.BadName), marker.Build, marker.ReleaseID); err != nil {
+					return true, err
+				}
+				if err := os.Remove(filepath.Join(a.cfg.StateDir, update.MarkerName)); err != nil {
+					return true, err
+				}
 			}
 			if a.heartbeatOK() == 0 {
 				return true, nil
