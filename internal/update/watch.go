@@ -293,6 +293,7 @@ func Watch(ctx context.Context, cfg WatchConfig) {
 	if interval <= 0 {
 		interval = time.Second
 	}
+	rollingBack := false
 	act := func() bool {
 		m, err := ReadMarker(cfg.MarkerPath)
 		if err != nil {
@@ -301,7 +302,11 @@ func Watch(ctx context.Context, cfg WatchConfig) {
 			}
 			return true
 		}
-		switch Evaluate(m, cfg.Now(), cfg.HeartbeatOK(), cfg.Baseline) {
+		action := Evaluate(m, cfg.Now(), cfg.HeartbeatOK(), cfg.Baseline)
+		if rollingBack && m != nil {
+			action = WatchRollback
+		}
+		switch action {
 		case WatchNone:
 			return true
 		case WatchConfirm:
@@ -314,6 +319,7 @@ func Watch(ctx context.Context, cfg WatchConfig) {
 			}
 			return true
 		case WatchRollback:
+			rollingBack = true
 			if cfg.Rollback == nil {
 				return true
 			}

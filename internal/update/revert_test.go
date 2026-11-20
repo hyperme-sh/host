@@ -133,7 +133,7 @@ func TestStartupWatchRetriesTransientRollbackFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	calls, exit := 0, false
-	Watch(ctx, WatchConfig{MarkerPath: marker, Interval: time.Millisecond, HeartbeatOK: func() uint64 { return 0 }, Now: func() time.Time { return time.Unix(2, 0) }, Rollback: func() error {
+	Watch(ctx, WatchConfig{MarkerPath: marker, Interval: time.Millisecond, HeartbeatOK: func() uint64 { return uint64(calls) }, Now: func() time.Time { return time.Unix(2, 0) }, Rollback: func() error {
 		calls++
 		if calls == 1 {
 			return fmt.Errorf("transient restore failure")
