@@ -35,6 +35,7 @@ type Config struct {
 	Busy           bool
 	RollbackWindow time.Duration
 	Now            time.Time
+	Clock          func() time.Time // checked after download, immediately before restart
 }
 
 // Hooks replace the plane, gpg, install, and restart in tests.
@@ -81,9 +82,12 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 		return Plan{Action: ActionOff, Reason: "channel unset"}, nil
 	}
 	cfg.Channel = ch
-	now := cfg.Now
-	if now.IsZero() {
-		now = time.Now()
+	clock := cfg.Clock
+	if clock == nil {
+		clock = time.Now
+		if !cfg.Now.IsZero() {
+			clock = func() time.Time { return cfg.Now }
+		}
 	}
 	window := cfg.RollbackWindow
 	if window <= 0 {
@@ -221,22 +225,37 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 		}
 		return Plan{Action: ActionDefer, Version: plan.Version, Commit: plan.Commit, Reason: "busy"}, nil
 	}
+	restore := func(cause error, removeMarker bool) error {
+		rb := h.Rollback
+		if rb == nil {
+			rb = RollbackFile
+		}
+		if err := rb(cfg.BinaryPath, backup); err != nil {
+			return errors.Join(cause, fmt.Errorf("restore previous agent: %w", err))
+		}
+		if removeMarker {
+			if err := os.Remove(cfg.MarkerPath); err != nil && !os.IsNotExist(err) {
+				return errors.Join(cause, fmt.Errorf("remove pending update: %w", err))
+			}
+		}
+		return cause
+	}
 	if err := WriteMarker(cfg.MarkerPath, Marker{
 		Binary:    cfg.BinaryPath,
 		Backup:    backup,
 		Version:   plan.Version,
-		Deadline:  now.Add(window),
+		Deadline:  clock().Add(window),
 		Build:     man.Build,
 		ReleaseID: man.ReleaseID,
 	}); err != nil {
-		return Plan{}, err
+		return Plan{}, restore(err, false)
 	}
 	restart := h.Restart
 	if restart == nil {
 		restart = RestartAgent
 	}
 	if err := restart(ctx); err != nil {
-		return Plan{}, err
+		return Plan{}, restore(err, true)
 	}
 	return plan, nil
 }

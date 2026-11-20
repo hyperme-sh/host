@@ -421,6 +421,78 @@ func TestTickVerificationAndBusy(t *testing.T) {
 		}
 	})
 
+	t.Run("slow install gets full rollback window", func(t *testing.T) {
+		cfg := base
+		cfg.MarkerPath = filepath.Join(t.TempDir(), MarkerName)
+		now := base.Now
+		cfg.Clock = func() time.Time { return now }
+		_, err := Tick(context.Background(), cfg, Hooks{
+			Source: src, Verify: func(_, _, _ []byte) error { return nil },
+			Install: func(dest string, _ []byte, _ string) (string, error) {
+				now = now.Add(3 * time.Minute)
+				return dest + ".pre-old", nil
+			}, Restart: func(context.Context) error { return nil },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		marker, err := ReadMarker(cfg.MarkerPath)
+		if err != nil || marker == nil {
+			t.Fatalf("marker %v: %v", marker, err)
+		}
+		if marker.Deadline.Sub(now) != 2*time.Minute {
+			t.Fatal("download consumed rollback window")
+		}
+	})
+	for _, failure := range []string{"marker", "restart", "rollback"} {
+		t.Run("restore after "+failure+" failure", func(t *testing.T) {
+			cfg := base
+			cfg.BinaryPath = filepath.Join(t.TempDir(), "agent")
+			cfg.MarkerPath = filepath.Join(t.TempDir(), MarkerName)
+			if err := os.WriteFile(cfg.BinaryPath, []byte("old"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if failure == "marker" {
+				cfg.MarkerPath = filepath.Join(t.TempDir(), "missing", MarkerName)
+			}
+			restarted := false
+			hooks := Hooks{
+				Source: src, Verify: func(_, _, _ []byte) error { return nil },
+				Install: InstallFile,
+				Restart: func(context.Context) error { restarted = true; return fmt.Errorf("restart failed") },
+			}
+			if failure == "rollback" {
+				hooks.Rollback = func(string, string) error { return fmt.Errorf("disk unavailable") }
+			}
+			_, err := Tick(context.Background(), cfg, hooks)
+			if err == nil {
+				t.Fatal("failure swallowed")
+			}
+			data, readErr := os.ReadFile(cfg.BinaryPath)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if failure == "rollback" {
+				if !strings.Contains(err.Error(), "disk unavailable") {
+					t.Fatal(err)
+				}
+				if marker, err := ReadMarker(cfg.MarkerPath); err != nil || marker == nil {
+					t.Fatal("lost rollback marker")
+				}
+			} else {
+				if string(data) != "old" {
+					t.Fatal("previous binary not restored")
+				}
+				if marker, err := ReadMarker(cfg.MarkerPath); err != nil || marker != nil {
+					t.Fatal("left pending marker")
+				}
+			}
+			if restarted != (failure != "marker") {
+				t.Fatal("unexpected restart")
+			}
+		})
+	}
+
 	t.Run("sas error is redacted", func(t *testing.T) {
 		const secret = "super-secret-sas"
 		leaky := planeSource(man, sums, []byte("sig"), manRaw, binName, bin)
