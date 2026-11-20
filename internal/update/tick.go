@@ -21,6 +21,7 @@ const maxAsset = 64 << 20
 
 // Config is one update check. There is no GitHub token on the host.
 type Config struct {
+	TargetSHA256 string // optional exact owner-requested target; never changes channel trust
 	CurrentChannel string // immutable installed binary origin, not the selected channel
 	Channel        string
 	CurrentVersion string
@@ -176,6 +177,9 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 	binArt, err := artifactByName(cand, binName)
 	if err != nil {
 		return rejected(err)
+	}
+	if cfg.TargetSHA256 != "" && cfg.TargetSHA256 != binArt.SHA256 {
+		return Plan{Action: ActionReject, Reason: "requested target is not the channel candidate"}, nil
 	}
 	if err := planeHashMatches(sums, binName, binArt); err != nil {
 		return rejected(err)

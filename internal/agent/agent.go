@@ -2,6 +2,7 @@
 package agent
 
 import (
+ "github.com/FyberLabs/hypermesh-host/internal/update"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -341,26 +342,25 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 	}
 }
 
+func (a *Agent) jobTick(ctx context.Context) {
+ a.syncAndRecord(ctx)
+ controlled, err := a.reconcileSoftware(ctx)
+ if err != nil { a.log.Warn("software request", "err", update.RedactQuery(err.Error())) }
+ if controlled { return }
+ if err := a.pullAndRun(ctx); err != nil { a.log.Warn("job pull failed", "err", err) }
+ a.maybeSelfUpdate(ctx)
+}
+
 func (a *Agent) jobLoop(ctx context.Context) {
-	a.syncAndRecord(ctx)
-	if err := a.pullAndRun(ctx); err != nil {
-		a.log.Warn("job pull failed", "err", err)
-	}
-	a.maybeSelfUpdate(ctx)
-	ticker := time.NewTicker(a.cfg.JobEvery)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			a.syncAndRecord(ctx)
-			if err := a.pullAndRun(ctx); err != nil {
-				a.log.Warn("job pull failed", "err", err)
-			}
-			a.maybeSelfUpdate(ctx)
-		}
-	}
+ a.jobTick(ctx)
+ ticker := time.NewTicker(a.cfg.JobEvery)
+ defer ticker.Stop()
+ for {
+  select {
+  case <-ctx.Done(): return
+  case <-ticker.C: a.jobTick(ctx)
+  }
+ }
 }
 
 func (a *Agent) setLease(h *runtime.Handle) {

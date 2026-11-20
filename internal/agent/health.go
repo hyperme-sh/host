@@ -87,6 +87,9 @@ func (a *Agent) fillHealth(ctx context.Context, h *api.HostHealth) {
 	h.LastSyncErrorClass = class
 	h.LastSyncHTTPStatus = status
 	h.BuildCommit = buildinfo.Current()
+ h.BuildVersion = buildinfo.CurrentVersion()
+ h.BuildNumber = buildinfo.CurrentBuild()
+ h.BuildChannel = buildinfo.CurrentChannel()
 	if ok {
 		h.LastSyncAt = at.UTC().Format(time.RFC3339)
 	}

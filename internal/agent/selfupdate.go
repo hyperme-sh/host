@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -134,6 +135,10 @@ func (a *Agent) maybeSelfUpdate(ctx context.Context) {
 }
 
 func (a *Agent) defaultSelfUpdate(ctx context.Context, busy bool) error {
+	return a.selectedSelfUpdate(ctx, busy, "", false)
+}
+
+func (a *Agent) selectedSelfUpdate(ctx context.Context, busy bool, target string, revert bool) error {
 	binary := strings.TrimSpace(a.cfg.UpdateBinary)
 	if binary == "" {
 		p, err := os.Executable()
@@ -154,7 +159,8 @@ func (a *Agent) defaultSelfUpdate(ctx context.Context, busy bool) error {
 	if err != nil {
 		return err
 	}
-	plan, err := update.Tick(ctx, update.Config{
+	cfg := update.Config{
+		TargetSHA256:   target,
 		Channel:        a.cfg.UpdateChannel,
 		CurrentChannel: buildinfo.CurrentChannel(),
 		CurrentVersion: buildinfo.CurrentVersion(),
@@ -168,15 +174,25 @@ func (a *Agent) defaultSelfUpdate(ctx context.Context, busy bool) error {
 		MarkerPath:     marker,
 		Busy:           busy,
 		RollbackWindow: a.cfg.UpdateRollback,
-	}, update.Hooks{
+	}
+	hooks := update.Hooks{
 		Source:    a.updateSource(),
 		StillBusy: a.Busy,
 		Log:       a.log,
-	})
+	}
+	var plan update.Plan
+	if revert {
+		plan, err = update.Revert(ctx, cfg, target, hooks)
+	} else {
+		plan, err = update.Tick(ctx, cfg, hooks)
+	}
 	if err != nil {
 		return err
 	}
 	logUpdate(a.log, plan)
+	if target != "" && plan.Action != update.ActionInstall && plan.Action != update.ActionDefer {
+		return fmt.Errorf("requested software target unavailable")
+	}
 	if plan.Action == update.ActionDefer {
 		return errUpdateDeferred
 	}
