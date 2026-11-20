@@ -2,12 +2,12 @@
 package agent
 
 import (
- "github.com/FyberLabs/hypermesh-host/internal/update"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/FyberLabs/hypermesh-host/internal/update"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -34,21 +34,21 @@ type Agent struct {
 	trusted runtime.Starter
 	// certEndpoint is a test seam; production certification always uses loopback.
 	certContextTokens int // nonzero only for an explicitly approved full-context check
-	certEndpoint string
-	certModelPath string // installer approval binds an exact local file
-	cfg     Config
-	client  *api.Client
-	telem   telem.Source
-	pathb   pathb.Runner
-	runtime *runtime.NVIDIA
-	hip     *runtime.HIP
- cpu *runtime.NVIDIA
-	metal   *runtime.Metal
-	tunnels tunnel.Applier
-	log     *slog.Logger
-	state   State
-	lease   *runtime.Handle
-	applied string // fingerprint of the host peer we last acked (not tunnel_id)
+	certEndpoint      string
+	certModelPath     string // installer approval binds an exact local file
+	cfg               Config
+	client            *api.Client
+	telem             telem.Source
+	pathb             pathb.Runner
+	runtime           *runtime.NVIDIA
+	hip               *runtime.HIP
+	cpu               *runtime.NVIDIA
+	metal             *runtime.Metal
+	tunnels           tunnel.Applier
+	log               *slog.Logger
+	state             State
+	lease             *runtime.Handle
+	applied           string // fingerprint of the host peer we last acked (not tunnel_id)
 	// bindMu guards bindIP. The metrics loop reads it while the job
 	// loop writes it from the tunnel session.
 	bindMu          sync.RWMutex
@@ -93,12 +93,12 @@ type Agent struct {
 	// Tests set it to lo.
 	ingressIface string
 	fwdMu        sync.Mutex
-	fwd   *leaseForwarder
+	fwd          *leaseForwarder
 	// fetchWeights downloads a pinned artifact for lab_pull. Nil uses
 	// the allowlisted HTTP fetcher. Tests stub this — never hit the network.
 	fetchWeights func(ctx context.Context, dest, sourceRef, pin string) error
- modelFit func(context.Context,int64)error
- modelProfile func(context.Context)hardware.Profile
+	modelFit     func(context.Context, int64) error
+	modelProfile func(context.Context) hardware.Profile
 	// dockerRun runs docker CLI. Nil uses the NVIDIA runtime's runner when
 	// available; tests inject a stub for egress observation.
 	dockerRun runtime.DockerRunner
@@ -142,12 +142,12 @@ type Agent struct {
 	metricsServe func(ctx context.Context, addr, tunnelHost string) (string, error)
 	metricsWake  chan struct{}
 
-	leaseMu  sync.RWMutex
-	sellMu   sync.Mutex
- maintenanceMu sync.Mutex
-	cacheMu  sync.Mutex
-	healthMu sync.Mutex
-	hbStreak int
+	leaseMu       sync.RWMutex
+	sellMu        sync.Mutex
+	maintenanceMu sync.Mutex
+	cacheMu       sync.Mutex
+	healthMu      sync.Mutex
+	hbStreak      int
 	// hbHoldUntil is the end of the current failure backoff or
 	// Retry-After. An immediate beat waits until this instant.
 	hbHoldUntil    time.Time
@@ -174,7 +174,7 @@ type Agent struct {
 	// lastUpdateCheck throttles the update channel. The job loop owns it.
 	lastUpdateCheck time.Time
 	nextUpdateRetry time.Time
-	updateFailures int
+	updateFailures  int
 	// selfUpdate overrides the update check. Nil uses the channel client.
 	// Tests set it. The job loop is the only caller.
 	selfUpdate func(ctx context.Context, busy bool) error
@@ -253,7 +253,7 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		},
 		runtime:      nvidia,
 		hip:          hip,
-        cpu:          cpu,
+		cpu:          cpu,
 		metal:        nativeMetal(cfg),
 		tunnels:      wg,
 		keyDir:       keyDirFor(cfg),
@@ -348,24 +348,34 @@ func (a *Agent) heartbeatLoop(ctx context.Context) {
 }
 
 func (a *Agent) jobTick(ctx context.Context) {
- a.syncAndRecord(ctx)
- controlled, err := a.reconcileSoftware(ctx)
- if err != nil { a.log.Warn("software request", "err", update.RedactQuery(err.Error())) }
- if controlled && a.softwareBlocksWork() { return }
- if err := a.pullAndRun(ctx); err != nil { a.log.Warn("job pull failed", "err", err) }
- if !controlled { a.maybeSelfUpdate(ctx) }
+	a.syncAndRecord(ctx)
+	controlled, err := a.reconcileSoftware(ctx)
+	if err != nil {
+		a.log.Warn("software request", "err", update.RedactQuery(err.Error()))
+	}
+	if controlled && a.softwareBlocksWork() {
+		return
+	}
+	if err := a.pullAndRun(ctx); err != nil {
+		a.log.Warn("job pull failed", "err", err)
+	}
+	if !controlled {
+		a.maybeSelfUpdate(ctx)
+	}
 }
 
 func (a *Agent) jobLoop(ctx context.Context) {
- a.jobTick(ctx)
- ticker := time.NewTicker(a.cfg.JobEvery)
- defer ticker.Stop()
- for {
-  select {
-  case <-ctx.Done(): return
-  case <-ticker.C: a.jobTick(ctx)
-  }
- }
+	a.jobTick(ctx)
+	ticker := time.NewTicker(a.cfg.JobEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.jobTick(ctx)
+		}
+	}
 }
 
 func (a *Agent) setLease(h *runtime.Handle) {
@@ -393,10 +403,10 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 		st.DeviceSecret = a.cfg.DeviceSecret
 	}
 	if strings.TrimSpace(st.DeviceID) != "" && strings.TrimSpace(st.DeviceSecret) != "" &&
-        !(a.cfg.Reenroll && strings.TrimSpace(a.cfg.EnrollToken) != "" && st.EnrollTokenHash != tokenHash) {
-        if st.WGKeyDir != "" {
-            a.keyDir = st.WGKeyDir
-        }
+		!(a.cfg.Reenroll && strings.TrimSpace(a.cfg.EnrollToken) != "" && st.EnrollTokenHash != tokenHash) {
+		if st.WGKeyDir != "" {
+			a.keyDir = st.WGKeyDir
+		}
 		a.state = st
 		a.client.DeviceSecret = st.DeviceSecret
 		a.client.DeviceID = st.DeviceID
@@ -414,11 +424,11 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 		return err
 	}
 
-    if st.DeviceID != "" && a.cfg.Reenroll {
-        if err := a.resetEnrollmentWork(ctx, st.DeviceID); err != nil {
-            return fmt.Errorf("hypermesh: retire local enrollment work: %w", err)
-        }
-    }
+	if st.DeviceID != "" && a.cfg.Reenroll {
+		if err := a.resetEnrollmentWork(ctx, st.DeviceID); err != nil {
+			return fmt.Errorf("hypermesh: retire local enrollment work: %w", err)
+		}
+	}
 
 	snap, err := a.telem.Collect(ctx)
 	if err != nil {
@@ -426,20 +436,20 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 	}
 	image := firstNonEmpty(a.cfg.ImageHash, snap.ImageHash)
 
-    // Stage a key per enrollment token. Network retries reuse it; a fresh
-    // enrollment never reuses the retired identity's WireGuard private key.
-    keyDir := filepath.Join(a.cfg.StateDir, "enrollment-keys", tokenHash)
-    _, publicKey, err := tunnel.LoadOrCreatePrivateKey(keyDir)
-    if err != nil {
-        return fmt.Errorf("hypermesh: prepare enrollment key: %w", err)
-    }
-    name := strings.TrimSpace(a.cfg.HostName)
-    if name == "" {
-        name, err = os.Hostname()
-        if err != nil || strings.TrimSpace(name) == "" {
-            return fmt.Errorf("hypermesh: HYPERMESH_HOST_NAME or hostname is required")
-        }
-    }
+	// Stage a key per enrollment token. Network retries reuse it; a fresh
+	// enrollment never reuses the retired identity's WireGuard private key.
+	keyDir := filepath.Join(a.cfg.StateDir, "enrollment-keys", tokenHash)
+	_, publicKey, err := tunnel.LoadOrCreatePrivateKey(keyDir)
+	if err != nil {
+		return fmt.Errorf("hypermesh: prepare enrollment key: %w", err)
+	}
+	name := strings.TrimSpace(a.cfg.HostName)
+	if name == "" {
+		name, err = os.Hostname()
+		if err != nil || strings.TrimSpace(name) == "" {
+			return fmt.Errorf("hypermesh: HYPERMESH_HOST_NAME or hostname is required")
+		}
+	}
 	var resp api.EnrollResponse
 	if a.cfg.ManagedDeviceID != "" {
 		resp, err = a.enrollManaged(ctx, keyDir, publicKey)
@@ -463,9 +473,9 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 	}
 	a.keyDir = keyDir
 	st = State{
-		ManagedScope: a.cfg.scope(),
-		EnrollTokenHash: tokenHash,
-		WGKeyDir: keyDir,
+		ManagedScope:     a.cfg.scope(),
+		EnrollTokenHash:  tokenHash,
+		WGKeyDir:         keyDir,
 		DeviceID:         resp.DeviceID,
 		CredentialPrefix: resp.CredentialPrefix,
 		DeviceSecret:     resp.DeviceSecret,
@@ -495,9 +505,11 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 	image := firstNonEmpty(a.cfg.ImageHash, snap.ImageHash)
 	sell := a.effectiveSell()
 	name := strings.TrimSpace(a.cfg.HostName)
-	if name == "" { name, _ = os.Hostname() }
+	if name == "" {
+		name, _ = os.Hostname()
+	}
 	hb, err := a.client.Heartbeat(ctx, api.HeartbeatRequest{
-		HostName: name,
+		HostName:        name,
 		DeviceID:        a.state.DeviceID,
 		ImageHash:       image,
 		LoadedModelHash: a.leaseImageDigest(),
@@ -763,6 +775,14 @@ func (a *Agent) pullAndRun(ctx context.Context) error {
 	if job == nil {
 		return nil
 	}
+	if job.SuiteID == pathb.SustainedDecodeProtocol && job.MeasurementProtocol != pathb.SustainedDecodeProtocol {
+		return fmt.Errorf("assigned sustained certification requires a compatible Plane response")
+	}
+	if job.MeasurementProtocol == pathb.SustainedDecodeProtocol {
+		if found, err := a.retrySustained(ctx, *job); found {
+			return err
+		}
+	}
 	a.log.Info("got job", "job_id", job.JobID, "kind", job.Kind, "suite_id", job.SuiteID, "lease_id", job.LeaseID, "backend", jobBackendLog(*job))
 	a.pendingResult.Store(true)
 	posted := false
@@ -779,27 +799,33 @@ func (a *Agent) pullAndRun(ctx context.Context) error {
 	if certifying {
 		before, beforeErr = a.telem.Collect(ctx)
 	}
-    var res jobOutcome
-    if certifying && (beforeErr != nil || before.EnvironmentHash == "" || (job.EnvironmentHash != "" && job.EnvironmentHash != before.EnvironmentHash)) {
-        res.Result = pathb.Result{Passed: false, Reason: "certification environment is unknown or differs from assigned environment"}
-    } else {
-        res = a.runJob(ctx, *job)
-    }
-    if certifying {
+	var res jobOutcome
+	if certifying && (beforeErr != nil || before.EnvironmentHash == "" || (job.EnvironmentHash != "" && job.EnvironmentHash != before.EnvironmentHash)) {
+		res.Result = pathb.Result{Passed: false, Reason: "certification environment is unknown or differs from assigned environment"}
+	} else {
+		res = a.runJob(ctx, *job)
+	}
+	if certifying {
 		after, afterErr := a.telem.Collect(ctx)
 		if beforeErr != nil || afterErr != nil || before.EnvironmentHash == "" || before.EnvironmentHash != after.EnvironmentHash || (job.EnvironmentHash != "" && job.EnvironmentHash != before.EnvironmentHash) {
 			res.Result = pathb.Result{Passed: false, Reason: "software changed during certification or differs from assigned environment"}
-        } else {
-            if job.EnvironmentHash != "" && (!res.Measured || !res.WorkloadVerified) {
-                res.Result = pathb.Result{Passed: false, Reason: "renewal requires a verified timed workload"}
-            }
-            // Stable inventory also binds genuine workload failures, allowing
-            // the plane to suspend this environment rather than ignore them.
-            res.EnvironmentHash = before.EnvironmentHash
-        }
+		} else {
+			if job.EnvironmentHash != "" && (!res.Measured || !res.WorkloadVerified) {
+				res.Result = pathb.Result{Passed: false, Reason: "renewal requires a verified timed workload"}
+			}
+			// Stable inventory also binds genuine workload failures, allowing
+			// the plane to suspend this environment rather than ignore them.
+			res.EnvironmentHash = before.EnvironmentHash
+		}
 	}
 	if job.Kind == api.KindPathB && strings.TrimSpace(job.CatalogID) == "" {
 		a.attachEgressObservation(ctx, &res)
+	}
+	if job.MeasurementProtocol == pathb.SustainedDecodeProtocol {
+		err := a.postSustained(ctx, *job, res.Result)
+		// The saved report survives a failed upload and permits updater recovery.
+		a.pendingResult.Store(false)
+		return err
 	}
 	// Compact-cert band check on the plane needs the scorecard before the
 	// job result greens certification state. A lab soak keeps post-then-scorecard.
@@ -930,7 +956,9 @@ func (a *Agent) runJob(ctx context.Context, job api.Job) jobOutcome {
 		if job.Kind == api.KindCompactCert || (job.Kind == api.KindPathB && strings.TrimSpace(job.CatalogID) != "") {
 			out := jobOutcome{}
 			out.Result = a.runCertWorkload(ctx, job, func(observation context.Context) {
-				if job.Kind == api.KindPathB { a.attachEgressObservation(observation, &out) }
+				if job.Kind == api.KindPathB {
+					a.attachEgressObservation(observation, &out)
+				}
 			})
 			return out
 		}
@@ -1079,7 +1107,11 @@ func (a *Agent) doFetchWeights(ctx context.Context, dest, sourceRef, pin string,
 		return &pull.DiskError{Unknown: true, Free: free}
 	}
 	lim.Expected = resolved
- if hit, e := a.verifyCachedArtifact(dest, pin, resolved); e != nil { return e } else if hit { return nil }
+	if hit, e := a.verifyCachedArtifact(dest, pin, resolved); e != nil {
+		return e
+	} else if hit {
+		return nil
+	}
 	lim, err = a.planModelEviction(dest, pin, lim)
 	if err != nil {
 		return err
@@ -1152,7 +1184,7 @@ func labPullFailReason(err error) string {
 		return disk.Error()
 	}
 	msg := err.Error()
-	if strings.HasPrefix(msg, "insufficient_disk:") || strings.HasPrefix(msg, "size_exceeded:") || strings.HasPrefix(msg,"model_cache_quota_exceeded:") {
+	if strings.HasPrefix(msg, "insufficient_disk:") || strings.HasPrefix(msg, "size_exceeded:") || strings.HasPrefix(msg, "model_cache_quota_exceeded:") {
 		return msg
 	}
 	switch {
@@ -1412,9 +1444,9 @@ func jobBackendLog(job api.Job) string {
 func runnerLog(path runtime.Path) string {
 	switch path {
 	case runtime.CPUContainer:
-        return runtime.BackendLlamaCppCPU
+		return runtime.BackendLlamaCppCPU
 	case runtime.VulkanContainer:
-        return runtime.BackendLlamaCppVulkan
+		return runtime.BackendLlamaCppVulkan
 	case runtime.HIPROCm:
 		return runtime.BackendHIPROCm
 	case runtime.LlamaCppHost:
@@ -1426,11 +1458,13 @@ func runnerLog(path runtime.Path) string {
 
 func (a *Agent) starterFor(path runtime.Path) runtime.Starter {
 	switch path {
-    case runtime.VulkanContainer:
-        return runtime.NewVulkan()
- case runtime.CPUContainer:
-        if a.cpu!=nil {return a.cpu}
-        return runtime.NewCPU()
+	case runtime.VulkanContainer:
+		return runtime.NewVulkan()
+	case runtime.CPUContainer:
+		if a.cpu != nil {
+			return a.cpu
+		}
+		return runtime.NewCPU()
 	case runtime.HIPROCm:
 		if a.hip != nil {
 			return a.hip
