@@ -444,7 +444,7 @@ func TestTickVerificationAndBusy(t *testing.T) {
 			t.Fatal("download consumed rollback window")
 		}
 	})
-	for _, failure := range []string{"marker", "restart", "rollback"} {
+	for _, failure := range []string{"install", "marker", "restart", "rollback"} {
 		t.Run("restore after "+failure+" failure", func(t *testing.T) {
 			cfg := base
 			cfg.BinaryPath = filepath.Join(t.TempDir(), "agent")
@@ -460,6 +460,15 @@ func TestTickVerificationAndBusy(t *testing.T) {
 				Source: src, Verify: func(_, _, _ []byte) error { return nil },
 				Install: InstallFile,
 				Restart: func(context.Context) error { restarted = true; return fmt.Errorf("restart failed") },
+			}
+			if failure == "install" {
+				hooks.Install = func(dest string, payload []byte, previous string) (string, error) {
+					backup, err := InstallFile(dest, payload, previous)
+					if err != nil {
+						return backup, err
+					}
+					return backup, fmt.Errorf("install sync failed")
+				}
 			}
 			if failure == "rollback" {
 				hooks.Rollback = func(string, string) error { return fmt.Errorf("disk unavailable") }
@@ -487,7 +496,7 @@ func TestTickVerificationAndBusy(t *testing.T) {
 					t.Fatal("left pending marker")
 				}
 			}
-			if restarted != (failure != "marker") {
+			if restarted != (failure == "restart" || failure == "rollback") {
 				t.Fatal("unexpected restart")
 			}
 		})

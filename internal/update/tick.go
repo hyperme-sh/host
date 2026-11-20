@@ -209,22 +209,6 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 		}
 	}
 	backup, err := install(cfg.BinaryPath, bin, previous)
-	if err != nil {
-		return Plan{}, err
-	}
-	// A lease can arrive while the binary is replaced. Do not restart
-	// over that job. Put the previous binary back and leave this
-	// process running.
-	if h.StillBusy != nil && h.StillBusy() {
-		rb := h.Rollback
-		if rb == nil {
-			rb = RollbackFile
-		}
-		if err := rb(cfg.BinaryPath, backup); err != nil {
-			return Plan{}, err
-		}
-		return Plan{Action: ActionDefer, Version: plan.Version, Commit: plan.Commit, Reason: "busy"}, nil
-	}
 	restore := func(cause error, removeMarker bool) error {
 		rb := h.Rollback
 		if rb == nil {
@@ -240,6 +224,25 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 		}
 		return cause
 	}
+	if err != nil {
+		if backup != "" {
+			return Plan{}, restore(err, false)
+		}
+		return Plan{}, err
+	}
+	// A lease can arrive while the binary is replaced. Do not restart
+	// over that job. Put the previous binary back and leave this
+	// process running.
+	if h.StillBusy != nil && h.StillBusy() {
+		rb := h.Rollback
+		if rb == nil {
+			rb = RollbackFile
+		}
+		if err := rb(cfg.BinaryPath, backup); err != nil {
+			return Plan{}, err
+		}
+		return Plan{Action: ActionDefer, Version: plan.Version, Commit: plan.Commit, Reason: "busy"}, nil
+	}
 	if err := WriteMarker(cfg.MarkerPath, Marker{
 		Binary:    cfg.BinaryPath,
 		Backup:    backup,
@@ -248,7 +251,7 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 		Build:     man.Build,
 		ReleaseID: man.ReleaseID,
 	}); err != nil {
-		return Plan{}, restore(err, false)
+		return Plan{}, restore(err, true)
 	}
 	restart := h.Restart
 	if restart == nil {
