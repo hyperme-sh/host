@@ -178,6 +178,13 @@ func WriteBadBuild(path string, build int, releaseID string) error {
 	if releaseID != "" && !releaseIDOK(releaseID) {
 		return fmt.Errorf("%w: update-bad release", ErrRejected)
 	}
+	previous, err := ReadBadBuild(path)
+	if err != nil {
+		return err
+	}
+	if previous >= build {
+		return nil
+	}
 	body := fmt.Sprintf("build=%d\nrelease_id=%s\n", build, releaseID)
 	return writeAtomic(path, body)
 }

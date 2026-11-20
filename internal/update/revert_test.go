@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRevertOnlyRetainedSignedTarget(t *testing.T) {
@@ -85,5 +87,39 @@ func TestFileSHA256RefusesNonFiles(t *testing.T) {
 	}
 	if _, err := Revert(context.Background(), Config{}, strings.Repeat("z", 64), Hooks{}); err == nil {
 		t.Fatal("invalid target accepted")
+	}
+}
+
+func TestFailedRevertStartupPreservesHigherBadBuild(t *testing.T) {
+	for _, shell := range []bool{false, true} {
+		t.Run(fmt.Sprint(shell), func(t *testing.T) {
+			dir := t.TempDir()
+			dest := filepath.Join(dir, "agent")
+			backup := dest + ".pre-old"
+			os.WriteFile(dest, []byte("bad"), 0755)
+			os.WriteFile(backup, []byte("working"), 0755)
+			marker := filepath.Join(dir, MarkerName)
+			if err := WriteBadBuild(filepath.Join(dir, BadName), 32, "known-bad"); err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteMarker(marker, Marker{Binary: dest, Backup: backup, Version: "0.0.30", Build: 30, Deadline: time.Unix(1, 0)}); err != nil {
+				t.Fatal(err)
+			}
+			if shell {
+				cmd := exec.Command("/bin/sh", filepath.Join("..", "..", "deploy", "lib", "update-rollback"))
+				cmd.Env = append(os.Environ(), "HYPERMESH_STATE_DIR="+dir)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("%s %v", out, err)
+				}
+			} else {
+				Watch(context.Background(), WatchConfig{MarkerPath: marker, Interval: time.Millisecond, HeartbeatOK: func() uint64 { return 0 }, Now: func() time.Time { return time.Unix(2, 0) }, Rollback: func() error { return RollbackFile(dest, backup) }, Exit: func(int) {}})
+			}
+			if got, err := ReadBadBuild(filepath.Join(dir, BadName)); err != nil || got != 32 {
+				t.Fatalf("threshold=%d err=%v", got, err)
+			}
+			if raw, err := os.ReadFile(dest); err != nil || string(raw) != "working" {
+				t.Fatal("rollback failed", err)
+			}
+		})
 	}
 }

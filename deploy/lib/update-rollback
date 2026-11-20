@@ -64,6 +64,23 @@ mv -f "$tmp" "$binary"
 case "$build" in
   [1-9]|[1-9][0-9]*)
     bad="${state}/update-bad"
+    if [ -f "$bad" ]; then
+      previous=""
+      while IFS='=' read -r key value; do
+        case "$key" in
+          build) previous=$value ;;
+          release_id) ;;
+          *) echo "hypermesh update: bad stored build" >&2; exit 1 ;;
+        esac
+      done < "$bad"
+      case "$previous" in
+        ""|*[!0-9]*) echo "hypermesh update: bad stored build" >&2; exit 1 ;;
+      esac
+      if [ "$previous" -ge "$build" ]; then
+        rm -f "$marker"
+        exit 0
+      fi
+    fi
     badnew="${bad}.new"
     printf 'build=%s\nrelease_id=%s\n' "$build" "$release_id" > "$badnew"
     mv -f "$badnew" "$bad"
