@@ -135,11 +135,13 @@ func (a *Agent) maybeSelfUpdate(ctx context.Context) {
 }
 
 func (a *Agent) defaultSelfUpdate(ctx context.Context, busy bool) error {
-	return a.selectedSelfUpdate(ctx, busy, "", false)
+	return a.selectedSelfUpdate(ctx, busy, "", false, "")
 }
 
-func (a *Agent) selectedSelfUpdate(ctx context.Context, busy bool, target string, revert bool) error {
-	binary := strings.TrimSpace(a.cfg.UpdateBinary)
+func (a *Agent) selectedSelfUpdate(ctx context.Context, busy bool, target string, revert bool, binary string) error {
+	if binary == "" {
+		binary = strings.TrimSpace(a.cfg.UpdateBinary)
+	}
 	if binary == "" {
 		p, err := os.Executable()
 		if err != nil {

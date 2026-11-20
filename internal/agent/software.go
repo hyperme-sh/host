@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/FyberLabs/hypermesh-host/internal/api"
@@ -18,6 +19,7 @@ import (
 // softwareJournal is saved before replacement. The running process digest,
 // confirmed startup and server acknowledgement are separate durable steps.
 type softwareJournal struct {
+	Binary  string              `json:"binary,omitempty"`
 	Command api.SoftwareCommand `json:"command"`
 	Started bool                `json:"started"`
 	RetryAt time.Time           `json:"retry_at,omitempty"`
@@ -90,6 +92,24 @@ func (a *Agent) reconcileSoftware(ctx context.Context) (bool, error) {
 		}
 		state.Command = *command
 	}
+	if state.Binary == "" {
+		state.Binary, err = a.softwareBinary()
+		if err != nil {
+			return true, err
+		}
+		if state.Started {
+			marker, markerErr := update.ReadMarker(filepath.Join(a.cfg.StateDir, update.MarkerName))
+			if markerErr != nil {
+				return true, markerErr
+			}
+			if marker != nil {
+				state.Binary = marker.Binary
+			}
+		}
+	}
+	if !filepath.IsAbs(state.Binary) || filepath.Clean(state.Binary) != state.Binary {
+		return true, fmt.Errorf("software command requires an absolute installation path")
+	}
 	cmd := state.Command
 	hashPattern := regexp.MustCompile(`^[a-f0-9]{64}$`)
 	idPattern := regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
@@ -117,7 +137,7 @@ func (a *Agent) reconcileSoftware(ctx context.Context) (bool, error) {
 				if running != cmd.ExpectedSHA256 || a.clock().Before(marker.Deadline) {
 					return true, nil
 				}
-				if marker.Binary != a.softwareBinary() {
+				if marker.Binary != state.Binary {
 					return true, fmt.Errorf("software recovery marker names another binary")
 				}
 				if err := update.RollbackFile(marker.Binary, "/proc/self/exe"); err != nil {
@@ -136,15 +156,15 @@ func (a *Agent) reconcileSoftware(ctx context.Context) (bool, error) {
 			if a.heartbeatOK() == 0 {
 				return true, nil
 			}
-			disk, hashErr := update.FileSHA256(a.softwareBinary())
+			disk, hashErr := update.FileSHA256(state.Binary)
 			if hashErr != nil || disk != running {
 				if running != cmd.ExpectedSHA256 && running != cmd.TargetSHA256 {
 					return true, fmt.Errorf("running software differs from both command binaries")
 				}
-				if err := update.RollbackFile(a.softwareBinary(), "/proc/self/exe"); err != nil {
+				if err := update.RollbackFile(state.Binary, "/proc/self/exe"); err != nil {
 					return true, fmt.Errorf("software restore remains incomplete: %w", err)
 				}
-				disk, hashErr = update.FileSHA256(a.softwareBinary())
+				disk, hashErr = update.FileSHA256(state.Binary)
 				if hashErr != nil || disk != running {
 					return true, fmt.Errorf("software restore verification failed")
 				}
@@ -184,7 +204,7 @@ func (a *Agent) reconcileSoftware(ctx context.Context) (bool, error) {
 				return true, err
 			}
 			operation, cancel := context.WithDeadline(ctx, cmd.ExpiresAt)
-			err := a.selectedSelfUpdate(operation, false, cmd.TargetSHA256, cmd.Action == "revert")
+			err := a.selectedSelfUpdate(operation, false, cmd.TargetSHA256, cmd.Action == "revert", state.Binary)
 			cancel()
 			if errors.Is(err, errUpdateDeferred) {
 				state.Started = false
@@ -200,7 +220,7 @@ func (a *Agent) reconcileSoftware(ctx context.Context) (bool, error) {
 				if marker != nil {
 					return true, err
 				}
-				disk, hashErr := update.FileSHA256(a.softwareBinary())
+				disk, hashErr := update.FileSHA256(state.Binary)
 				if hashErr != nil || disk != running {
 					return true, fmt.Errorf("software restore must finish before retry")
 				}
@@ -223,12 +243,16 @@ func (a *Agent) reconcileSoftware(ctx context.Context) (bool, error) {
 	return true, os.Remove(path)
 }
 
-func (a *Agent) softwareBinary() string {
-	if a.cfg.UpdateBinary != "" {
-		return a.cfg.UpdateBinary
+func (a *Agent) softwareBinary() (string, error) {
+	path := strings.TrimSpace(a.cfg.UpdateBinary)
+	if path == "" {
+		var err error
+		path, err = os.Executable()
+		if err != nil {
+			return "", err
+		}
 	}
-	path, _ := os.Executable()
-	return path
+	return filepath.Abs(path)
 }
 
 // Completed result delivery may delay another software change, never workloads.

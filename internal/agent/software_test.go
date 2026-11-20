@@ -173,3 +173,34 @@ func TestSoftwareRetriesExpiredMarkerRecoveryInOriginalProcess(t *testing.T) {
 		t.Fatal("recovered command still blocks work")
 	}
 }
+
+func TestSoftwareRecoveryUsesPersistedDestinationInsteadOfExecutablePath(t *testing.T) {
+	running, err := update.FileSHA256("/proc/self/exe")
+	if err != nil {
+		t.Skip("Linux executable required")
+	}
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "installed-agent")
+	if err := os.WriteFile(binary, []byte("partial target"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	journal := softwareJournal{Binary: binary, Started: true, Command: api.SoftwareCommand{RequestID: testJob, DeviceID: testDevice, Action: "update", ExpectedSHA256: running, TargetSHA256: strings.Repeat("b", 64), ExpiresAt: time.Now().Add(time.Hour)}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{}`)) }))
+	defer server.Close()
+	a := &Agent{cfg: Config{StateDir: dir}, state: State{DeviceID: testDevice}, client: api.NewClient(server.URL, testTenant), hbOK: 1}
+	a.client.DeviceSecret = testSecret
+	if err := saveSoftware(filepath.Join(dir, "software-command.json"), journal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.reconcileSoftware(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if disk, err := update.FileSHA256(binary); err != nil || disk != running {
+		t.Fatal("recovery checked the running backup instead of destination")
+	}
+	a.cfg.UpdateBinary = "./relative-agent"
+	resolved, err := a.softwareBinary()
+	if err != nil || !filepath.IsAbs(resolved) || filepath.Base(resolved) != "relative-agent" {
+		t.Fatal("relative path not normalized", err)
+	}
+}
