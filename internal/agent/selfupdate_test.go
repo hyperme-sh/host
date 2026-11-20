@@ -241,3 +241,36 @@ func TestMaybeSelfUpdateRespectsOwnerRetryAfter(t *testing.T) {
 		t.Fatal("retried during owner hold")
 	}
 }
+
+func TestMaybeSelfUpdateBackoffStartsAfterSlowAttempt(t *testing.T) {
+	for _, hold := range []time.Duration{0, 10 * time.Minute} {
+		t.Run(hold.String(), func(t *testing.T) {
+			now := time.Unix(10000, 0)
+			a := &Agent{cfg: Config{UpdateChannel: "test"}, now: func() time.Time { return now }, log: discardLog()}
+			calls := 0
+			a.selfUpdate = func(context.Context, bool) error {
+				calls++
+				now = now.Add(2 * time.Minute)
+				return &api.StatusError{StatusCode: 503, HasRetryAfter: hold > 0, RetryAfter: hold}
+			}
+			a.maybeSelfUpdate(context.Background())
+			delay := 15 * time.Second
+			if hold > delay {
+				delay = hold
+			}
+			if got := a.nextUpdateRetry.Sub(now); got != delay {
+				t.Fatalf("remaining delay = %v, want %v", got, delay)
+			}
+			now = now.Add(delay - time.Nanosecond)
+			a.maybeSelfUpdate(context.Background())
+			if calls != 1 {
+				t.Fatal("retried before full delay elapsed")
+			}
+			now = now.Add(time.Nanosecond)
+			a.maybeSelfUpdate(context.Background())
+			if calls != 2 {
+				t.Fatal("did not retry after delay")
+			}
+		})
+	}
+}

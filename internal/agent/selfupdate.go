@@ -104,6 +104,7 @@ func (a *Agent) maybeSelfUpdate(ctx context.Context) {
 		fn = a.defaultSelfUpdate
 	}
 	err := fn(ctx, false)
+	now = a.clock()
 	if errors.Is(err, errUpdateDeferred) {
 		// A lease or result became pending during verification. The next idle
 		// job tick should retry instead of consuming the hourly interval.
@@ -120,7 +121,7 @@ func (a *Agent) maybeSelfUpdate(ctx context.Context) {
 			delay = 5 * time.Minute
 		}
 		var status *api.StatusError
-		if errors.As(err, &status) && status.HasRetryAfter && status.RetryAfter > delay {
+		if errors.As(err, &status) && status != nil && status.HasRetryAfter && status.RetryAfter > delay {
 			delay = status.RetryAfter
 		}
 		a.nextUpdateRetry = now.Add(delay)
