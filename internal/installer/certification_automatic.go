@@ -24,16 +24,46 @@ func automaticNativeInputs() (registration, model, binary string, err error) {
 	return
 }
 
+type nativeProvisionedInputs struct {
+	Registration string `json:"registration_plan_sha256"`
+	Model        string `json:"model_file"`
+	Runtime      string `json:"runtime_file"`
+}
+
+func readNativeProvisionedInputs(dir string) (nativeProvisionedInputs, error) {
+	var provisioned nativeProvisionedInputs
+	path := filepath.Join(dir, "native-certification.json")
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		provisioned.Registration, provisioned.Model, provisioned.Runtime, err = automaticNativeInputs()
+		return provisioned, err
+	} else if err != nil {
+		return provisioned, err
+	}
+	raw, err := macRead(path, 0600, 16<<10)
+	if err != nil {
+		return provisioned, err
+	}
+	if err := macDecode(raw, &provisioned); err != nil {
+		return provisioned, err
+	}
+	if !macSHA.MatchString(provisioned.Registration) ||
+		!filepath.IsAbs(provisioned.Model) || !filepath.IsAbs(provisioned.Runtime) {
+		return provisioned, fmt.Errorf("invalid provisioned native certification inputs")
+	}
+	return provisioned, nil
+}
+
 // RunAutomaticNative reads deployment-provisioned pinned inputs. It uses the
 // same private journal and evidence checks as the manual native collector.
 func RunAutomaticNative(ctx context.Context, cfg agent.Config, state agent.State, shape string) error {
 	if !strings.HasPrefix(shape, "sha256:") || !macSHA.MatchString(strings.TrimPrefix(shape, "sha256:")) {
 		return fmt.Errorf("invalid automatic native shape")
 	}
-	registration, model, binary, err := automaticNativeInputs()
+	inputs, err := readNativeProvisionedInputs(macPath("", cfg.StateDir))
 	if err != nil {
 		return err
 	}
+	registration, model, binary := inputs.Registration, inputs.Model, inputs.Runtime
 	dir := macPath("", filepath.Join(cfg.StateDir, "native-automatic"))
 	if err := macDirectory(dir, true, true); err != nil {
 		return err
