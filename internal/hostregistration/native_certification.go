@@ -17,6 +17,7 @@ const NativeReferencePurpose = "lab-qualification-v1"
 const nativeCertificatePurpose = "native-certification-v1"
 
 type NativeManifest struct {
+	ShapeSignature     string   `json:"hardware_shape_signature,omitempty"`
 	InventoryEpoch     string   `json:"inventory_epoch"`
 	SuiteID            string   `json:"suite_id"`
 	CatalogID          string   `json:"catalog_id"`
@@ -54,6 +55,11 @@ func haloNativeClass(name string) string {
 }
 
 func (m NativeManifest) Validate() error {
+	if m.ShapeSignature != "" && (!strings.HasPrefix(m.ShapeSignature, "sha256:") ||
+		!hashRE.MatchString(strings.TrimPrefix(m.ShapeSignature, "sha256:"))) {
+		return fmt.Errorf("invalid native hardware shape signature")
+	}
+
 	if stamp, e := time.Parse(time.RFC3339Nano, m.InventoryEpoch); e != nil || stamp.IsZero() {
 		return fmt.Errorf("native inventory epoch is missing")
 	}
