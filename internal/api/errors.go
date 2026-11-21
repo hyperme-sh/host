@@ -23,6 +23,11 @@ var (
 	ErrUnauthorized = errors.New("hypermesh api: missing or wrong device secret")
 	// ErrSecretMismatch is a 403: secret does not match device_id.
 	ErrSecretMismatch = errors.New("hypermesh api: device secret does not match device_id")
+
+	// ErrJobIntake indicates that Plane recognized the host but denied workload dispatch.
+	ErrJobIntake = errors.New("hypermesh api: host intake and certification must pass before workload dispatch")
+	// ErrNoAssignedRecertification indicates that the host can only pull an assigned recertification job.
+	ErrNoAssignedRecertification = errors.New("hypermesh api: no current assigned recertification job")
 	// ErrMissingSecret is a local error before a call that requires Bearer.
 	ErrMissingSecret = errors.New("hypermesh api: Bearer device secret is required")
 	// ErrUnknownDevice is a 404 from heartbeat, job pull, or tunnel GET.
@@ -103,6 +108,18 @@ func mapStatus(method, path string, code int, payload []byte, hdr http.Header) e
 	case http.StatusUnauthorized:
 		return ErrUnauthorized
 	case http.StatusForbidden:
+		if method == http.MethodGet && path == PathJobs {
+			switch detailString(payload) {
+			case "Host intake and certification must pass before workload dispatch":
+				return ErrJobIntake
+			case "A current assigned recertification job is required":
+				return ErrNoAssignedRecertification
+			case "Device credential does not match device_id", "Machine token belongs to another host":
+				return ErrSecretMismatch
+			default:
+				return statusErr(method, path, code, hdr)
+			}
+		}
 		return ErrSecretMismatch
 	case http.StatusNotFound:
 		if strings.HasSuffix(path, "/result") {
