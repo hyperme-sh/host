@@ -18,14 +18,18 @@ import (
 	"github.com/FyberLabs/hypermesh-host/internal/telem"
 )
 
+const nativeAutomaticHalo = true
+
 func runHaloNativeCertification(ctx context.Context, args []string, out, diagnostic io.Writer, planning bool) int {
 	if os.Geteuid() != 0 || runtime.GOARCH != "amd64" {
 		fmt.Fprintln(diagnostic, "native Halo certification requires root on Linux amd64")
 		return 1
 	}
-	if err := os.Setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin"); err != nil {
-		fmt.Fprintln(diagnostic, "cannot set trusted system tool path")
-		return 1
+	if _, managed := nativeAutomatic(ctx); !managed {
+		if err := os.Setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin"); err != nil {
+			fmt.Fprintln(diagnostic, "cannot set trusted system tool path")
+			return 1
+		}
 	}
 	return runNativeCertification(ctx, args, out, diagnostic, planning, nativeDeps{
 		installation: haloNativeInstallation,
@@ -88,11 +92,13 @@ func haloNativeInstallation(_ context.Context, digest, agentPlanPath string) (na
 	}
 
 	check := func(ctx context.Context) error {
-		for _, unit := range []string{"hypermesh-halo-test-agent.service", "hypermesh-agent.service", "hypermesh-wg.service"} {
-			raw, err := (setupSource{}).output(ctx, "systemctl", "--system", "show", unit, "-p", "ActiveState", "--value")
-			state := strings.TrimSpace(string(raw))
-			if err != nil || (state != "inactive" && state != "failed") {
-				return fmt.Errorf("%s must be inactive for native certification", unit)
+		if _, managed := nativeAutomatic(ctx); !managed {
+			for _, unit := range []string{"hypermesh-halo-test-agent.service", "hypermesh-agent.service", "hypermesh-wg.service"} {
+				raw, err := (setupSource{}).output(ctx, "systemctl", "--system", "show", unit, "-p", "ActiveState", "--value")
+				state := strings.TrimSpace(string(raw))
+				if err != nil || (state != "inactive" && state != "failed") {
+					return fmt.Errorf("%s must be inactive for native certification", unit)
+				}
 			}
 		}
 		for _, state := range []string{haloState, "/var/lib/hypermesh"} {

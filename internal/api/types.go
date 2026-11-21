@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/FyberLabs/hypermesh-host/internal/hardware"
 	"github.com/FyberLabs/hypermesh-host/internal/trustedmeter"
 	"time"
 )
@@ -84,6 +85,7 @@ type ManagedEnrollRequest struct {
 // Health is additive. Older planes ignore it (pydantic extra='ignore').
 // Existing fields stay. A missing Health is the pre-health body.
 type HeartbeatRequest struct {
+	HardwareShape *hardware.Shape `json:"hardware_shape,omitempty"`
 	EnvironmentHash string      `json:"environment_hash,omitempty"`
 	HostName        string      `json:"host_name,omitempty"`
 	DeviceID        string      `json:"device_id"`
@@ -176,6 +178,8 @@ const (
 
 // HeartbeatResponse is the 200 body from heartbeat.
 type HeartbeatResponse struct {
+	NativeCertificationDue bool `json:"native_certification_due,omitempty"`
+	HardwareShapeSignature string `json:"hardware_shape_signature,omitempty"`
 	DeviceID   string     `json:"device_id"`
 	PathBState PathBState `json:"path_b_state"`
 	SellState  SellState  `json:"sell_state,omitempty"`

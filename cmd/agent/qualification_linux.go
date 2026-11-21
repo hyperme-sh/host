@@ -7,4 +7,5 @@ import "github.com/FyberLabs/hypermesh-host/internal/installer"
 
 func configureQualification(cfg *agent.Config) {
 	cfg.RunPendingQualification = installer.RunPendingQualification
+	cfg.RunAutomaticNative = installer.RunAutomaticNative
 }

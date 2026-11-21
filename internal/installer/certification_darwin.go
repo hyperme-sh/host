@@ -32,13 +32,18 @@ func RunCertifyAgent(ctx context.Context, args []string, out, diagnostic io.Writ
 func RunPlanCertification(ctx context.Context, args []string, out, diagnostic io.Writer) int {
 	return runNativeMac(ctx, args, out, diagnostic, true)
 }
+
+const nativeAutomaticHalo = false
+
 func runNativeMac(ctx context.Context, args []string, out, diagnostic io.Writer, planning bool) int {
 	if os.Geteuid() != 0 || runtime.GOARCH != "arm64" {
 		fmt.Fprintln(diagnostic, "native certificate execution requires root on Apple silicon")
 		return 1
 	}
-	if err := os.Setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin"); err != nil {
-		return 1
+	if _, managed := nativeAutomatic(ctx); !managed {
+		if err := os.Setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin"); err != nil {
+			return 1
+		}
 	}
 	d := nativeDeps{registration: macRegistrationDeps{detect: hardware.Detect, command: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

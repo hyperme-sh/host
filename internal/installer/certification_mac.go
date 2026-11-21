@@ -23,6 +23,7 @@ import (
 )
 
 type nativePlan struct {
+	AutomaticShape  string                      `json:"automatic_shape,omitempty"`
 	Schema          int                         `json:"schema"`
 	RegistrationSHA string                      `json:"registration_sha256"`
 	RunID           string                      `json:"run_id"`
@@ -52,9 +53,21 @@ type nativeDeps struct {
 	measure      func(context.Context, []string, io.Writer, io.Writer) int
 }
 
+type automaticNativeKey struct{}
+
+type automaticNative struct {
+	device, tenant, shape string
+}
+
+func nativeAutomatic(ctx context.Context) (automaticNative, bool) {
+	settings, ok := ctx.Value(automaticNativeKey{}).(automaticNative)
+	return settings, ok
+}
+
 func nativePlanDigest(p nativePlan) string { raw, _ := json.Marshal(p); return macDigest(raw) }
 
 func runNativeCertification(ctx context.Context, args []string, out, diagnostic io.Writer, planning bool, d nativeDeps) int {
+	automatic, managed := nativeAutomatic(ctx)
 	flags := flag.NewFlagSet("native-certification", flag.ContinueOnError)
 	flags.SetOutput(diagnostic)
 	path := flags.String("plan", "", "private native certification plan file (created by plan-certification)")
@@ -110,7 +123,7 @@ func runNativeCertification(ctx context.Context, args []string, out, diagnostic 
 		if e != nil {
 			return fail(e)
 		}
-		p = nativePlan{Schema: 1, RegistrationSHA: *registration, RunID: id, Environment: environment, Hardware: hardware, FirstReference: *firstReference}
+		p = nativePlan{Schema: 1, RegistrationSHA: *registration, RunID: id, Environment: environment, Hardware: hardware, FirstReference: *firstReference, AutomaticShape: automatic.shape}
 	} else if err != nil {
 		return fail(err)
 	} else if err = macDecode(raw, &p); err != nil {
@@ -118,6 +131,9 @@ func runNativeCertification(ctx context.Context, args []string, out, diagnostic 
 	}
 	if p.Schema != 1 || !macSHA.MatchString(p.RegistrationSHA) || !hostregistration.UUID.MatchString(p.RunID) || !strings.HasPrefix(p.Environment, "sha256:") || !macSHA.MatchString(strings.TrimPrefix(p.Environment, "sha256:")) || !macSHA.MatchString(p.Hardware) || (planning && (p.RegistrationSHA != *registration || p.FirstReference != *firstReference)) {
 		return fail(fmt.Errorf("invalid native plan"))
+	}
+	if p.AutomaticShape != automatic.shape {
+		return fail(fmt.Errorf("native automatic plan is bound to another hardware shape"))
 	}
 	if !planning && (p.Run == nil || nativePlanDigest(p) != *approved) {
 		return fail(fmt.Errorf("native plan digest differs"))
@@ -133,6 +149,9 @@ func runNativeCertification(ctx context.Context, args []string, out, diagnostic 
 		return fail(err)
 	}
 	j := installation.journal
+	if managed && (j.DeviceID != automatic.device || installation.tenant != automatic.tenant) {
+		return fail(fmt.Errorf("native plan belongs to another enrolled agent"))
+	}
 	check := func() error {
 		if err := installation.check(ctx); err != nil {
 			return err
@@ -169,6 +188,15 @@ func runNativeCertification(ctx context.Context, args []string, out, diagnostic 
 		}
 		if p.Run == nil {
 			plan := client.PlanNativeCertification
+			if managed {
+				scheduler, ok := client.(interface {
+					PlanAutomaticNativeCertification(context.Context, hostregistration.Request, string, string, string, string, string) (hostregistration.NativeRun, error)
+				})
+				if !ok {
+					return fail(fmt.Errorf("automatic native planning unavailable"))
+				}
+				plan = scheduler.PlanAutomaticNativeCertification
+			}
 			if p.FirstReference {
 				referenceClient, ok := client.(interface {
 					PlanNativeReference(context.Context, hostregistration.Request, string, string, string, string, string) (hostregistration.NativeRun, error)
@@ -181,6 +209,9 @@ func runNativeCertification(ctx context.Context, args []string, out, diagnostic 
 			result, e := plan(ctx, j.Request, j.DeviceID, j.DeviceSecret, p.RunID, p.Environment, p.Hardware)
 			if e != nil {
 				return fail(e)
+			}
+			if managed && result.Manifest.ShapeSignature != automatic.shape {
+				return fail(fmt.Errorf("native assignment does not match the approved hardware shape"))
 			}
 			if result.Manifest.CollectorCommit != buildinfo.Current() {
 				return fail(fmt.Errorf("reviewed collector revision differs from this CLI; request identity retained for retry"))
@@ -318,7 +349,8 @@ func macNativeInstallation(ctx context.Context, d nativeDeps, state, registratio
 		if e = macIdentity(d.registration, j, false); e != nil {
 			return e
 		}
-		if e = macServices(ctx, d.registration, false, false); e != nil {
+		_, managed := nativeAutomatic(ctx)
+		if e = macServices(ctx, d.registration, managed, false); e != nil {
 			return e
 		}
 		if _, e = os.Lstat(macPath(d.registration.root, "/var/lib/hypermesh/lease.json")); !os.IsNotExist(e) {
