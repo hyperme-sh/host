@@ -749,7 +749,13 @@ func (a *Agent) refreshCompletions() {
 }
 
 func (a *Agent) pullAndRun(ctx context.Context) error {
-	_ = a.effectiveSell()
+	posture := a.effectiveSell()
+	if a.cfg.RunPendingQualification != nil && posture.SellState == "paused" &&
+		a.currentLease() == nil && !a.pendingResult.Load() {
+		if err := a.cfg.RunPendingQualification(ctx, a.cfg, a.state); err != nil {
+			a.log.Warn("benchmark pickup or collection did not complete")
+		}
+	}
 	job, err := a.client.PullJob(ctx, a.state.DeviceID)
 	if err != nil {
 		return err

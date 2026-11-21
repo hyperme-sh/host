@@ -1,6 +1,7 @@
 package agent
 
 import (
+ "context"
 	"fmt"
 	"io"
 	"net/url"
@@ -42,6 +43,7 @@ var uuidRE = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 
 // Config is env/flag configuration for the host agent.
 type Config struct {
+	RunPendingQualification func(context.Context, Config, State) error
 	TrustedMeterBundle string
 	PrivateBlobAccount string // Exact Azure account; empty disables private model delivery.
 	HostName           string

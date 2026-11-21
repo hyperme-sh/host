@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,7 @@ import (
 )
 
 type qualificationJournal struct {
+	ClaimID       string                               `json:"claim_id,omitempty"`
 	FailureDetail string                               `json:"failure_detail,omitempty"`
 	Schema        int                                  `json:"schema"`
 	AgentSHA      string                               `json:"agent_sha256"`
@@ -204,7 +206,7 @@ func RunQualifyHost(ctx context.Context, args []string, input io.Reader, out, di
 	var j qualificationJournal
 	if _, e := os.Lstat(journalPath); e == nil {
 		err = guidedRead(journalPath, &j, true)
-		if err == nil && (j.Schema != 1 || j.AgentSHA != p.Agent.SHA256 || j.Run.RunID != *id || j.Run.DeviceID != identity.DeviceID || j.Run.RequestID != identity.Request.RequestID || j.Run.TenantID != p.Agent.TenantID || j.Run.Manifest.ClassID != identity.Request.ClassID || j.Run.Manifest.ValidateQualification() != nil || !setupDigestRE.MatchString(j.Run.ManifestSHA256) || !validQualificationCheckpoint(j) || !supportOneOf(j.State, "approved", "running", "evidence-ready", "reported")) {
+		if err == nil && (j.Schema != 1 || j.ClaimID != "" || j.AgentSHA != p.Agent.SHA256 || j.Run.RunID != *id || j.Run.DeviceID != identity.DeviceID || j.Run.RequestID != identity.Request.RequestID || j.Run.TenantID != p.Agent.TenantID || j.Run.Manifest.ClassID != identity.Request.ClassID || j.Run.Manifest.ValidateQualification() != nil || !setupDigestRE.MatchString(j.Run.ManifestSHA256) || !validQualificationCheckpoint(j) || !supportOneOf(j.State, "approved", "running", "evidence-ready", "reported")) {
 			err = fmt.Errorf("invalid qualification journal; preserve state")
 		}
 	} else if os.IsNotExist(e) {
@@ -233,26 +235,36 @@ func RunQualifyHost(ctx context.Context, args []string, input io.Reader, out, di
 		fmt.Fprintln(diagnostic, err)
 		return 1
 	}
-	p.Run = j.Run.CertificationRun
-	p.ModelPath = filepath.Join(p.Agent.Setup.Preflight.Resources.ModelDirectory, "cache", strings.TrimPrefix(p.Run.Manifest.FileHash, "sha256:")+".gguf")
-	p.SHA256 = certificationDigest(p)
-	if _, err = certificationURL(p.Run.Manifest.SourceRef); err != nil {
-		fmt.Fprintln(diagnostic, err)
-		return 1
-	}
-	token, err := modelAccessToken(*tokenPath)
+	err = collectQualification(ctx, p, identity, c, &j, journalPath, *tokenPath, out,
+		func(ctx context.Context) error { return certPreflight(ctx, p, identity) })
+	fmt.Fprintln(out, "Qualification evidence saved at", journalPath)
 	if err != nil {
 		fmt.Fprintln(diagnostic, err)
 		return 1
 	}
+	fmt.Fprintln(out, "Measurements recorded. The program operator must review and publish the baseline before normal host certification. No services were activated.")
+	return 0
+}
+
+func collectQualification(ctx context.Context, p certificationPlan, identity registrationJournal, c *hostregistration.Client, j *qualificationJournal, journalPath, tokenPath string, out io.Writer, check func(context.Context) error) error {
+	p.Run = j.Run.CertificationRun
+	p.ModelPath = filepath.Join(p.Agent.Setup.Preflight.Resources.ModelDirectory, "cache", strings.TrimPrefix(p.Run.Manifest.FileHash, "sha256:")+".gguf")
+	p.SHA256 = certificationDigest(p)
+	if _, err := certificationURL(p.Run.Manifest.SourceRef); err != nil {
+		return err
+	}
+	token, err := modelAccessToken(tokenPath)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Minute)
 	defer cancel()
-	err = performQualification(ctx, &j, qualificationDeps{
+	return performQualification(ctx, j, qualificationDeps{
 		Check: func(ctx context.Context) error {
 			if !j.Run.ExpiresAt.After(time.Now()) {
 				return fmt.Errorf("run expired")
 			}
-			return certPreflight(ctx, p, identity)
+			return check(ctx)
 		},
 		Acquire: func(ctx context.Context) error {
 			if err := agentDirectory(filepath.Dir(p.ModelPath), true); err != nil {
@@ -275,6 +287,10 @@ func RunQualifyHost(ctx context.Context, args []string, input io.Reader, out, di
 		},
 		Save: func(value qualificationJournal) error { return writeGuided(journalPath, value) },
 		Report: func(ctx context.Context, report hostregistration.QualificationReport) error {
+			if j.ClaimID != "" {
+				_, err := c.ReportClaimedQualification(ctx, identity.Request, identity.DeviceID, identity.DeviceSecret, j.Run, report, j.ClaimID)
+				return err
+			}
 			result, err := c.ReportQualification(ctx, identity.Request, identity.DeviceID, identity.DeviceSecret, j.Run, report)
 			expected := "passed"
 			if report.FailureCode != "" {
@@ -286,13 +302,105 @@ func RunQualifyHost(ctx context.Context, args []string, input io.Reader, out, di
 			return err
 		},
 	})
-	fmt.Fprintln(out, "Qualification evidence saved at", journalPath)
-	if err != nil {
-		fmt.Fprintln(diagnostic, err)
-		return 1
+}
+
+// RunPendingQualification runs only for a guided installation whose existing
+// identity and installed plan match the running agent.
+func RunPendingQualification(ctx context.Context, cfg agent.Config, state agent.State) error {
+	if os.Geteuid() != 0 || cfg.StateDir != "/var/lib/hypermesh" {
+		return nil
 	}
-	fmt.Fprintln(out, "Measurements recorded. The program operator must review and publish the baseline before normal host certification. No services were activated.")
-	return 0
+	dir := filepath.Join(defaultSetupState, "guided")
+	var guided guidedState
+	if err := guidedRead(filepath.Join(dir, "session.json"), &guided, true); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	unlock, err := lockSetupState(defaultSetupState)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	planDir, err := guidedPlanDirectory(dir, guided)
+	if err != nil {
+		return err
+	}
+	p := certificationPlan{Schema: 1}
+	if err := readQualificationAgentPlan(filepath.Join(planDir, "agent.json"), &p.Agent); err != nil {
+		return err
+	}
+	if p.Agent.ControlPlane != cfg.ControlPlaneURL || p.Agent.TenantID != cfg.TenantID ||
+		agentPlanDigest(p.Agent) != p.Agent.SHA256 || validateInstalledAgentInputs(p.Agent) != nil {
+		return fmt.Errorf("installed benchmark plan does not match the agent")
+	}
+	var identity registrationJournal
+	if err := guidedRead(registrationPath(defaultSetupState, p.Agent.SHA256), &identity, true); err != nil {
+		return err
+	}
+	if identity.DeviceID != state.DeviceID || identity.DeviceSecret != state.DeviceSecret ||
+		validateRegistration(identity, p.Agent, identity.Issuer, identity.Dashboard, identity.Request.ClassID) != nil {
+		return fmt.Errorf("benchmark installation identity does not match the agent")
+	}
+	check := func(ctx context.Context) error {
+		if _, err := os.Lstat(filepath.Join(cfg.StateDir, "lease.json")); !os.IsNotExist(err) {
+			return fmt.Errorf("local lease must be reconciled before benchmark execution")
+		}
+		if _, err := net.InterfaceByName("hypermesh"); err == nil {
+			return fmt.Errorf("benchmark tunnel probe requires the existing interface to be inactive")
+		}
+		_, err := registrationPreflight(ctx, p.Agent, identity.Request.ClassID)
+		return err
+	}
+	c, err := newRegistrationClient(p.Agent.ControlPlane, p.Agent.TenantID)
+	if err != nil {
+		return err
+	}
+	run, err := c.PendingQualification(ctx, identity.Request, state.DeviceID, state.DeviceSecret)
+	if err != nil || run == nil {
+		return err
+	}
+	// Give collection and cleanup their full bounded window before Plane can
+	// release the benchmark's exclusion at plan expiry.
+	if time.Until(run.ExpiresAt) < 65*time.Minute {
+		return nil
+	}
+	if err := check(ctx); err != nil {
+		return err
+	}
+	path := filepath.Join(defaultSetupState, "qualification-"+run.RunID+".json")
+	var j qualificationJournal
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		claim, err := hostregistration.NewRunID()
+		if err != nil {
+			return err
+		}
+		j = qualificationJournal{Schema: 1, AgentSHA: p.Agent.SHA256, Run: *run, State: "approved", ClaimID: claim,
+			Report: hostregistration.QualificationReport{Samples: []hostregistration.QualificationSample{},
+				Software: hostregistration.QualificationSoftware{Kernel: p.Agent.Setup.Platform.Kernel, OSVersion: p.Agent.Setup.Platform.Version, InstallerCommit: buildinfo.Current()}}}
+		if err := writeGuided(path, j); err != nil {
+			return err
+		}
+	} else {
+		if err != nil {
+			return err
+		}
+		if err := guidedRead(path, &j, true); err != nil {
+			return err
+		}
+		if j.Schema != 1 || j.AgentSHA != p.Agent.SHA256 || !hostregistration.UUID.MatchString(j.ClaimID) ||
+			j.Run.RunID != run.RunID || j.Run.DeviceID != run.DeviceID || j.Run.RequestID != run.RequestID ||
+			j.Run.TenantID != run.TenantID || j.Run.ManifestSHA256 != run.ManifestSHA256 ||
+			!hostregistration.SameManifest(j.Run.Manifest, run.Manifest) || !validQualificationCheckpoint(j) {
+			return fmt.Errorf("benchmark journal does not match the pending plan")
+		}
+		j.Run = *run
+	}
+	if err := c.ClaimQualification(ctx, identity.Request, state.DeviceID, state.DeviceSecret, *run, j.ClaimID); err != nil {
+		return err
+	}
+	return collectQualification(ctx, p, identity, c, &j, path, "", io.Discard, check)
 }
 
 func validQualificationCheckpoint(j qualificationJournal) bool {
