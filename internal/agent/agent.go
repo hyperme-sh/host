@@ -29,6 +29,9 @@ import (
 
 // Agent is the host process.
 type Agent struct {
+	shapeMu sync.Mutex
+	shapeCheckedAt time.Time
+	shape *hardware.Shape
 	// Captured before an update can rename the running executable.
 	installBinary string
 	trusted runtime.Starter
@@ -496,6 +499,16 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 	return nil
 }
 
+func (a *Agent) heartbeatShape(ctx context.Context) *hardware.Shape {
+	a.shapeMu.Lock()
+	defer a.shapeMu.Unlock()
+	if time.Since(a.shapeCheckedAt) >= 10*time.Minute {
+		a.shape = hardware.DetectShape(ctx)
+		a.shapeCheckedAt = time.Now()
+	}
+	return a.shape
+}
+
 func (a *Agent) heartbeat(ctx context.Context) error {
 	snap, err := a.telem.Collect(ctx)
 	if err != nil {
@@ -509,6 +522,7 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 		name, _ = os.Hostname()
 	}
 	hb, err := a.client.Heartbeat(ctx, api.HeartbeatRequest{
+		HardwareShape: a.heartbeatShape(ctx),
 		HostName:        name,
 		DeviceID:        a.state.DeviceID,
 		ImageHash:       image,

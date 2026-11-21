@@ -18,6 +18,7 @@ import (
 
 	"github.com/FyberLabs/hypermesh-host/internal/api"
 	"github.com/FyberLabs/hypermesh-host/internal/buildinfo"
+	"github.com/FyberLabs/hypermesh-host/internal/hardware"
 	"github.com/FyberLabs/hypermesh-host/internal/metrics"
 	"github.com/FyberLabs/hypermesh-host/internal/pull"
 	"github.com/FyberLabs/hypermesh-host/internal/runtime"
@@ -67,6 +68,8 @@ func TestHeartbeatHealthShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := newTestAgent(t, srv.URL, dir, uptime, "", "")
+	a.shapeCheckedAt = time.Now()
+	a.shape = &hardware.Shape{CPU: "fixture cpu", GPUs: []string{"fixture gpu"}, MemoryBytes: 64 << 30}
 	a.cfg.HostName = "reported-test-host"
 	a.state.DeviceID = testDevice
 	a.client.DeviceSecret = testSecret
@@ -113,13 +116,18 @@ func TestHeartbeatHealthShape(t *testing.T) {
 	if err := json.Unmarshal(raw, &top); err != nil {
 		t.Fatal(err)
 	}
-	wantTop := []string{"environment_hash", "host_name", "device_id", "image_hash", "loaded_model_hash", "uptime_s", "sell_state", "health"}
+	wantTop := []string{"hardware_shape", "environment_hash", "host_name", "device_id", "image_hash", "loaded_model_hash", "uptime_s", "sell_state", "health"}
 	if !sameKeys(top, wantTop) {
 		t.Fatalf("top-level keys %s", raw)
 	}
 	var hb api.HeartbeatRequest
 	if err := json.Unmarshal(raw, &hb); err != nil {
 		t.Fatal(err)
+	}
+	if hb.HardwareShape == nil || hb.HardwareShape.CPU != "fixture cpu" ||
+		hb.HardwareShape.MemoryBytes != 64<<30 || len(hb.HardwareShape.GPUs) != 1 ||
+		hb.HardwareShape.GPUs[0] != "fixture gpu" {
+		t.Fatalf("hardware shape missing or changed: %+v", hb.HardwareShape)
 	}
 	if hb.DeviceID != testDevice || hb.UptimeS != 12 || hb.ImageHash != "sha256:fixture" || hb.SellState != api.SellSelling || hb.LoadedModelHash != digest {
 		t.Fatalf("old fields changed: %+v", hb)
