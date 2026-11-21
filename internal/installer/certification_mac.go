@@ -339,14 +339,11 @@ func macNativeInstallation(ctx context.Context, d nativeDeps, state, registratio
 		return nativeInstallation{}, fmt.Errorf("native certification requires the current inactive Mac registration")
 	}
 	check := func(ctx context.Context) error {
-		current, hardware, e := macSnapshot(ctx, d.registration, config)
-		if e != nil {
-			return e
-		}
 		_, managed := nativeAutomatic(ctx)
-		if e = validateMacNativeSnapshot(current, registrationSHA, hardware, j.Request.Hardware, managed); e != nil {
+		if e := checkMacNativeSnapshot(ctx, d.registration, config, state, registrationSHA, managed); e != nil {
 			return e
 		}
+		var e error
 		if e = macIdentity(d.registration, j, false); e != nil {
 			return e
 		}
@@ -361,18 +358,26 @@ func macNativeInstallation(ctx context.Context, d nativeDeps, state, registratio
 	return nativeInstallation{journal: j, plane: config.ControlPlane, tenant: config.Tenant, check: check}, nil
 }
 
-// The original registration digest includes installed binary bytes. For a
-// running agent, the frozen Plane workload separately pins the collector build.
-func validateMacNativeSnapshot(current, registered string, hardware, original hostregistration.Hardware, managed bool) error {
+func checkMacNativeSnapshot(ctx context.Context, d macRegistrationDeps, config macRegistrationConfig, state, registered string, managed bool) error {
+	current, _, err := macSnapshot(ctx, d, config)
+	if err != nil {
+		return err
+	}
 	if current == registered {
 		return nil
 	}
-	hardware.ModelMemoryBytes = 0
-	original.ModelMemoryBytes = 0
-	if !managed || hardware != original {
-		return fmt.Errorf("installed Mac configuration differs")
+	// Reproduce the original digest with its authenticated agent hash.
+	// All other inputs still come from the current installation.
+	if managed {
+		prior, err := macRead(filepath.Join(state, "registration-"+registered+".json.agent-sha256"), 0600, 64)
+		if err == nil && macSHA.Match(prior) {
+			reconstructed, _, err := macSnapshotWithAgent(ctx, d, config, string(prior))
+			if err == nil && reconstructed == registered {
+				return nil
+			}
+		}
 	}
-	return nil
+	return fmt.Errorf("installed Mac configuration differs")
 }
 
 func printNativePlan(out io.Writer, path string, p nativePlan) int {

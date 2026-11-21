@@ -447,3 +447,46 @@ func TestMacRegistrationPendingCannotBeRestarted(t *testing.T) {
 		t.Fatal("pending request changed")
 	}
 }
+
+func TestManagedNativeMacSnapshotOnlySubstitutesEnrolledAgentHash(t *testing.T) {
+	f := newMacFixture(t)
+	ctx := context.Background()
+	raw, err := macRead(macPath(f.d.root, "/etc/hypermesh/agent.env"), 0o600, 2<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := macConfig(raw, macTestArgs[1], macTestArgs[3])
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, _, err := macSnapshot(ctx, f.d, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := macPath(f.d.root, macRegistrationState)
+	agentPath := macPath(f.d.root, macInstalledAgent)
+	agent, err := macRead(agentPath, 0o755, 256<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := filepath.Join(state, "registration-"+registered+".json.agent-sha256")
+	if err := macWrite(prior, []byte(macDigest(agent)), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentPath, []byte("signed update fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkMacNativeSnapshot(ctx, f.d, config, state, registered, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkMacNativeSnapshot(ctx, f.d, config, state, registered, false); err == nil {
+		t.Fatal("manual planning accepted a changed agent")
+	}
+	wg := macPath(f.d.root, "/usr/local/libexec/hypermesh/wg")
+	if err := os.WriteFile(wg, []byte("changed tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkMacNativeSnapshot(ctx, f.d, config, state, registered, true); err == nil {
+		t.Fatal("managed planning accepted a changed non-agent input")
+	}
+}

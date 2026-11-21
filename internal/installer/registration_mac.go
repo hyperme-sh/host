@@ -81,7 +81,14 @@ func macConfig(raw []byte, issuer, dashboard string) (macRegistrationConfig, err
 	}
 	return c, nil
 }
+
+const macInstalledAgent = "/usr/local/bin/hypermesh-agent"
+
 func macSnapshot(ctx context.Context, d macRegistrationDeps, c macRegistrationConfig) (string, hostregistration.Hardware, error) {
+	return macSnapshotWithAgent(ctx, d, c, "")
+}
+
+func macSnapshotWithAgent(ctx context.Context, d macRegistrationDeps, c macRegistrationConfig, originalAgentSHA string) (string, hostregistration.Hardware, error) {
 	p := d.detect(ctx)
 	f := p.Facts
 	if f.Arch != "arm64" || p.Family != "apple-silicon" || !f.Metal || !regexp.MustCompile(`(?i)^Apple M[1-9][0-9]*( (Pro|Max|Ultra))?$`).MatchString(f.Processor) || f.MemoryBytes <= 0 || p.ModelBudgetBytes <= 0 || p.ModelBudgetBytes > f.MemoryBytes {
@@ -94,7 +101,7 @@ func macSnapshot(ctx context.Context, d macRegistrationDeps, c macRegistrationCo
 		mode     os.FileMode
 		expected string
 	}{
-		{"/usr/local/bin/hypermesh-agent", 0o755, ""},
+		{macInstalledAgent, 0o755, ""},
 		{"/usr/local/libexec/hypermesh/wireguard-go", 0o755, ""},
 		{"/usr/local/libexec/hypermesh/wg", 0o755, ""},
 		{"/Library/LaunchDaemons/com.fyberlabs.hypermesh-agent.plist", 0o644, mac.AgentPlist},
@@ -109,6 +116,9 @@ func macSnapshot(ctx context.Context, d macRegistrationDeps, c macRegistrationCo
 			return "", h, fmt.Errorf("installed LaunchDaemon differs from the reviewed definition")
 		}
 		files[spec.path] = macDigest(raw)
+		if spec.path == macInstalledAgent && originalAgentSHA != "" {
+			files[spec.path] = originalAgentSHA
+		}
 	}
 	// Free memory is a transient estimate, not a model allocation qualification.
 	// Bind the stable hardware to the journal; retain the initial estimate there.
@@ -272,9 +282,16 @@ func runMacRegister(ctx context.Context, args []string, out, diagnostic io.Write
 		return fail(err)
 	}
 	path := filepath.Join(state, "registration-"+sha+".json")
+	agent, err := macRead(macPath(d.root, macInstalledAgent), 0o755, 256<<20)
+	if err != nil {
+		return fail(err)
+	}
 	save := func(j registrationJournal) error {
 		raw, err := json.Marshal(j)
 		if err != nil {
+			return err
+		}
+		if err := macWrite(path+".agent-sha256", []byte(macDigest(agent)), false); err != nil {
 			return err
 		}
 		return macWrite(path, raw, true)
