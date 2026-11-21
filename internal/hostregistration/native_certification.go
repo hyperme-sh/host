@@ -116,7 +116,7 @@ type NativeEvidence struct {
 	PhysicalAcceptance bool           `json:"physical_acceptance"`
 }
 
-func (c *Client) nativeCertification(ctx context.Context, r Request, device, secret, id, environment, hardware string, previous *NativeRun, evidence *NativeEvidence, firstReference bool) (NativeRun, error) {
+func (c *Client) nativeCertification(ctx context.Context, r Request, device, secret, id, environment, hardware string, previous *NativeRun, evidence *NativeEvidence, firstReference, automatic bool) (NativeRun, error) {
 	var out NativeRun
 	haloClass := haloNativeClass(r.HostName)
 	metal := r.ClassID == "darwin-arm64-lab"
@@ -134,6 +134,9 @@ func (c *Client) nativeCertification(ctx context.Context, r Request, device, sec
 	if previous == nil {
 		body["environment_hash"] = environment
 		body["hardware_fingerprint"] = hardware
+		if automatic {
+			body["automatic"] = true
+		}
 		if firstReference {
 			body["first_reference"] = true
 		}
@@ -161,11 +164,14 @@ func (c *Client) nativeCertification(ctx context.Context, r Request, device, sec
 	return out, nil
 }
 func (c *Client) PlanNativeCertification(ctx context.Context, r Request, device, secret, id, environment, hardware string) (NativeRun, error) {
-	return c.nativeCertification(ctx, r, device, secret, id, environment, hardware, nil, nil, false)
+	return c.nativeCertification(ctx, r, device, secret, id, environment, hardware, nil, nil, false, false)
+}
+func (c *Client) PlanAutomaticNativeCertification(ctx context.Context, r Request, device, secret, id, environment, hardware string) (NativeRun, error) {
+	return c.nativeCertification(ctx, r, device, secret, id, environment, hardware, nil, nil, false, true)
 }
 func (c *Client) PlanNativeReference(ctx context.Context, r Request, device, secret, id, environment, hardware string) (NativeRun, error) {
-	return c.nativeCertification(ctx, r, device, secret, id, environment, hardware, nil, nil, true)
+	return c.nativeCertification(ctx, r, device, secret, id, environment, hardware, nil, nil, true, false)
 }
 func (c *Client) ReportNativeCertification(ctx context.Context, r Request, device, secret string, run NativeRun, e NativeEvidence) (NativeRun, error) {
-	return c.nativeCertification(ctx, r, device, secret, run.RunID, "", "", &run, &e, run.Manifest.Purpose == NativeReferencePurpose)
+	return c.nativeCertification(ctx, r, device, secret, run.RunID, "", "", &run, &e, run.Manifest.Purpose == NativeReferencePurpose, false)
 }

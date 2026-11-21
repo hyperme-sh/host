@@ -43,6 +43,7 @@ var uuidRE = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 
 // Config is env/flag configuration for the host agent.
 type Config struct {
+	RunAutomaticNative func(context.Context, Config, State, string) error
 	RunPendingQualification func(context.Context, Config, State) error
 	TrustedMeterBundle string
 	PrivateBlobAccount string // Exact Azure account; empty disables private model delivery.

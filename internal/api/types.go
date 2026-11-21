@@ -178,6 +178,8 @@ const (
 
 // HeartbeatResponse is the 200 body from heartbeat.
 type HeartbeatResponse struct {
+	NativeCertificationDue bool `json:"native_certification_due,omitempty"`
+	HardwareShapeSignature string `json:"hardware_shape_signature,omitempty"`
 	DeviceID   string     `json:"device_id"`
 	PathBState PathBState `json:"path_b_state"`
 	SellState  SellState  `json:"sell_state,omitempty"`

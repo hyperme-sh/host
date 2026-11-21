@@ -29,6 +29,8 @@ import (
 
 // Agent is the host process.
 type Agent struct {
+	nativeHeartbeat atomic.Pointer[api.HeartbeatResponse]
+	nativeRetryAfter time.Time
 	shapeMu sync.Mutex
 	shapeCheckedAt time.Time
 	shape *hardware.Shape
@@ -537,6 +539,7 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 		a.recordHeartbeat(err)
 		return err
 	}
+	a.nativeHeartbeat.Store(&hb)
 	a.recordHeartbeat(nil)
 	a.log.Info("heartbeat accepted",
 		"device_id", hb.DeviceID,
@@ -788,6 +791,20 @@ func (a *Agent) pullAndRun(ctx context.Context) error {
 			if err := a.cfg.RunPendingQualification(ctx, a.cfg, a.state); err != nil {
 				a.log.Warn("benchmark pickup or collection did not complete")
 			}
+		}
+		a.maintenanceMu.Unlock()
+	}
+	if hb := a.nativeHeartbeat.Load(); a.cfg.RunAutomaticNative != nil && hb != nil &&
+		hb.DeviceID == a.state.DeviceID && hb.NativeCertificationDue &&
+		strings.HasPrefix(hb.HardwareShapeSignature, "sha256:") && len(hb.HardwareShapeSignature) == 71 &&
+		time.Since(hb.AcceptedAt) >= 0 && time.Since(hb.AcceptedAt) <= 2*time.Minute &&
+		posture.SellState == "paused" && a.currentLease() == nil && !a.pendingResult.Load() {
+		a.maintenanceMu.Lock()
+		if !a.maintenanceHeld() && time.Now().After(a.nativeRetryAfter) {
+			if err := a.cfg.RunAutomaticNative(ctx, a.cfg, a.state, hb.HardwareShapeSignature); err != nil {
+				a.log.Warn("automatic native certification did not complete")
+			}
+			a.nativeRetryAfter = time.Now().Add(5 * time.Minute)
 		}
 		a.maintenanceMu.Unlock()
 	}
