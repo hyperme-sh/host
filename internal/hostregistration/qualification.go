@@ -27,7 +27,7 @@ type QualificationReport struct {
 	Software    QualificationSoftware `json:"software"`
 }
 
-func (c *Client) qualification(ctx context.Context, r Request, device, secret, id string, previous *QualificationRun, report *QualificationReport) (QualificationRun, error) {
+func (c *Client) qualification(ctx context.Context, r Request, device, secret, id string, previous *QualificationRun, report *QualificationReport, claimID string) (QualificationRun, error) {
 	var out QualificationRun
 	if r.Validate() != nil || !UUID.MatchString(device) || !UUID.MatchString(id) || !onboardingSecretRE.MatchString(secret) {
 		return out, fmt.Errorf("invalid qualification identity")
@@ -41,6 +41,13 @@ func (c *Client) qualification(ctx context.Context, r Request, device, secret, i
 	op := "plan"
 	if previous != nil {
 		body["manifest_sha256"] = previous.ManifestSHA256
+	}
+	if claimID != "" {
+		if previous == nil || !UUID.MatchString(claimID) {
+			return out, fmt.Errorf("invalid qualification claim identity")
+		}
+		body["claim_id"] = claimID
+		op = "claim"
 	}
 	if report != nil {
 		op = "result"
@@ -97,10 +104,29 @@ func (c *Client) PendingQualification(ctx context.Context, r Request, device, se
 }
 
 func (c *Client) PlanQualification(ctx context.Context, r Request, device, secret, id string) (QualificationRun, error) {
-	return c.qualification(ctx, r, device, secret, id, nil, nil)
+	return c.qualification(ctx, r, device, secret, id, nil, nil, "")
 }
 func (c *Client) ReportQualification(ctx context.Context, r Request, device, secret string, run QualificationRun, report QualificationReport) (QualificationRun, error) {
-	return c.qualification(ctx, r, device, secret, run.RunID, &run, &report)
+	return c.qualification(ctx, r, device, secret, run.RunID, &run, &report, "")
+}
+
+// ClaimQualification binds execution to a caller-persisted claim UUID.
+func (c *Client) ClaimQualification(ctx context.Context, r Request, device, secret string, run QualificationRun, claimID string) error {
+	if !UUID.MatchString(claimID) {
+		return fmt.Errorf("invalid qualification claim identity")
+	}
+	claimed, err := c.qualification(ctx, r, device, secret, run.RunID, &run, nil, claimID)
+	if err == nil && claimed.State != "planned" {
+		return fmt.Errorf("qualification claim is not planned")
+	}
+	return err
+}
+
+func (c *Client) ReportClaimedQualification(ctx context.Context, r Request, device, secret string, run QualificationRun, report QualificationReport, claimID string) (QualificationRun, error) {
+	if !UUID.MatchString(claimID) {
+		return QualificationRun{}, fmt.Errorf("invalid qualification claim identity")
+	}
+	return c.qualification(ctx, r, device, secret, run.RunID, &run, &report, claimID)
 }
 
 // QualificationNext is a device-bound decision, never authority to activate.
