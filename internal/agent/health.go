@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/FyberLabs/hypermesh-host/internal/pathb"
 	"net"
 	"os/exec"
 	"strings"
@@ -70,8 +71,9 @@ func (a *Agent) recordHeartbeat(err error) {
 // into the heartbeat.
 func (a *Agent) safeHealth(ctx context.Context) (h *api.HostHealth) {
 	h = &api.HostHealth{
-		BuildCommit: buildinfo.Current(),
-		HostType:    a.cfg.ReportedHostType(),
+		BuildCommit:            buildinfo.Current(),
+		CertificationProtocols: []string{pathb.SustainedDecodeProtocol},
+		HostType:               a.cfg.ReportedHostType(),
 	}
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -87,6 +89,9 @@ func (a *Agent) fillHealth(ctx context.Context, h *api.HostHealth) {
 	h.LastSyncErrorClass = class
 	h.LastSyncHTTPStatus = status
 	h.BuildCommit = buildinfo.Current()
+	h.BuildVersion = buildinfo.CurrentVersion()
+	h.BuildNumber = buildinfo.CurrentBuild()
+	h.BuildChannel = buildinfo.CurrentChannel()
 	if ok {
 		h.LastSyncAt = at.UTC().Format(time.RFC3339)
 	}

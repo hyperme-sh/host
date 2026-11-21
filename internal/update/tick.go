@@ -12,7 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
- "runtime"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -21,6 +21,7 @@ const maxAsset = 64 << 20
 
 // Config is one update check. There is no GitHub token on the host.
 type Config struct {
+	TargetSHA256   string // optional exact owner-requested target; never changes channel trust
 	CurrentChannel string // immutable installed binary origin, not the selected channel
 	Channel        string
 	CurrentVersion string
@@ -60,11 +61,13 @@ type Hooks struct {
 // agent keeps running and tries again later. Errors never carry a
 // SAS query string.
 func Tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
- return tickForOS(runtime.GOOS,ctx,cfg,h)
+	return tickForOS(runtime.GOOS, ctx, cfg, h)
 }
 
-func tickForOS(goos string, ctx context.Context, cfg Config, h Hooks) (Plan,error) {
- if goos!="linux" {return Plan{Action:ActionOff,Reason:"automatic updates require a qualified platform service lifecycle"},nil}
+func tickForOS(goos string, ctx context.Context, cfg Config, h Hooks) (Plan, error) {
+	if goos != "linux" {
+		return Plan{Action: ActionOff, Reason: "automatic updates require a qualified platform service lifecycle"}, nil
+	}
 	plan, err := tick(ctx, cfg, h)
 	if err != nil {
 		return Plan{}, scrub(err)
@@ -165,6 +168,9 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 	if man.Channel != cand.Channel || man.Version != cand.Version || !strings.EqualFold(strings.TrimSpace(man.Commit), strings.TrimSpace(cand.Commit)) || man.Build != cand.Build {
 		return Plan{Action: ActionReject, Reason: "signed release.json does not match the plane"}, nil
 	}
+	if cfg.TargetSHA256 != "" && man.SoftwareControlProtocol != 1 {
+		return Plan{Action: ActionReject, Reason: "requested target lacks remote software controls"}, nil
+	}
 	plan := DecideFromChannel(cfg.CurrentChannel, cfg.Channel, cfg.CurrentVersion, cfg.CurrentCommit, cfg.CurrentBuild, cfg.BadBuild, man, cfg.Busy)
 	if plan.Action != ActionInstall {
 		return plan, nil
@@ -176,6 +182,9 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 	binArt, err := artifactByName(cand, binName)
 	if err != nil {
 		return rejected(err)
+	}
+	if cfg.TargetSHA256 != "" && cfg.TargetSHA256 != binArt.SHA256 {
+		return Plan{Action: ActionReject, Reason: "requested target is not the channel candidate"}, nil
 	}
 	if err := planeHashMatches(sums, binName, binArt); err != nil {
 		return rejected(err)
@@ -208,6 +217,9 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 			return Plan{}, err
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return Plan{}, err
+	}
 	backup, err := install(cfg.BinaryPath, bin, previous)
 	restore := func(cause error, removeMarker bool) error {
 		rb := h.Rollback
@@ -229,6 +241,9 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 			return Plan{}, restore(err, false)
 		}
 		return Plan{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return Plan{}, restore(err, false)
 	}
 	// A lease can arrive while the binary is replaced. Do not restart
 	// over that job. Put the previous binary back and leave this
@@ -256,6 +271,9 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 	restart := h.Restart
 	if restart == nil {
 		restart = RestartAgent
+	}
+	if err := ctx.Err(); err != nil {
+		return Plan{}, restore(err, true)
 	}
 	if err := restart(ctx); err != nil {
 		return Plan{}, restore(err, true)

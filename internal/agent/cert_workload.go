@@ -21,9 +21,11 @@ import (
 var certImagePin = regexp.MustCompile(`^[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64}$`)
 
 func validCertificationImage(value string) bool {
- if certImagePin.MatchString(value) {return true}
- _, err := runtime.ChannelRef(value)
- return err == nil
+	if certImagePin.MatchString(value) {
+		return true
+	}
+	_, err := runtime.ChannelRef(value)
+	return err == nil
 }
 
 // runCertWorkload owns a temporary, pinned workload for this job only.
@@ -31,6 +33,16 @@ func validCertificationImage(value string) bool {
 // cannot be turned into a certification sample. No service activation,
 // model download, lease creation or sell-state change happens here.
 func (a *Agent) runCertWorkload(ctx context.Context, job api.Job, observe func(context.Context)) (result pathb.Result) {
+	v2 := job.MeasurementProtocol == pathb.SustainedDecodeProtocol
+	if job.MeasurementProtocol != "" && !v2 {
+		return pathb.Result{Reason: "unsupported measurement protocol"}
+	}
+	if v2 && (job.SuiteID != pathb.SustainedDecodeProtocol || job.CertificationContextTokens == 0 || !certImagePin.MatchString(job.ImageDigest)) {
+		return pathb.Result{Reason: "sustained certification requires explicit suite, context and immutable runtime"}
+	}
+	if v2 {
+		job.SuiteID = pathb.SuitePackV1
+	}
 	job.SuiteID = certSuite(job.SuiteID)
 	contextWindow := a.certContextTokens
 	if job.CertificationContextTokens != 0 {
@@ -169,14 +181,29 @@ func (a *Agent) runCertWorkload(ctx context.Context, job api.Job, observe func(c
 		}
 	}
 	var fit *pathb.ContextFit
-	if contextWindow > 0 {
-		var err error
-		fit, err = runner.CheckContextFit(ctx, contextWindow)
+	if v2 {
+		var measurement *pathb.DecodeMeasurement
+		fit, measurement, err = runner.MeasureSustained(ctx, contextWindow)
 		if err != nil {
-			return fail("full-context check failed: " + err.Error())
+			return fail(err.Error())
 		}
+		snap, collectErr := a.telem.Collect(ctx)
+		if collectErr != nil {
+			return fail("certification telemetry unavailable")
+		}
+		measurement.ImageDigest = job.ImageDigest
+		result = pathb.Result{Passed: true, Measured: true, ImageHash: snap.ImageHash, ThermalC: snap.ThermalC,
+			MeasurementProtocol: pathb.SustainedDecodeProtocol, Measurement: measurement,
+			SampleMs: int(measurement.DecodeElapsedMS), DecodeTokS: float64(measurement.DecodeTokens) * 1000 / float64(measurement.DecodeElapsedMS)}
+	} else {
+		if contextWindow > 0 {
+			fit, err = runner.CheckContextFit(ctx, contextWindow)
+			if err != nil {
+				return fail("full-context check failed: " + err.Error())
+			}
+		}
+		result = a.requireImageHash(job.Kind, runner.Run(ctx, job))
 	}
-	result = a.requireImageHash(job.Kind, runner.Run(ctx, job))
 	result.ContextFit = fit
 	if !result.Passed || !result.Measured || ctx.Err() != nil {
 		return fail("certification requires a real timed completion")

@@ -305,6 +305,7 @@ doc = {
     "commit": commit,
     "build": int(build),
     "release_id": release_id,
+    "software_control_protocol": 1,
 }
 with open(out, "w", encoding="utf-8") as fh:
     json.dump(doc, fh, separators=(",", ":"))

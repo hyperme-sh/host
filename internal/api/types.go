@@ -125,15 +125,16 @@ func TunnelHealthStates() []string {
 // an empty string when there is no class. last_sync_http_status is 0
 // when there is no status. A failed collection must not fail the heartbeat.
 type HostHealth struct {
-	TunnelState         string `json:"tunnel_state,omitempty"`
-	LastSyncAt          string `json:"last_sync_at,omitempty"`
-	LastSyncErrorClass  string `json:"last_sync_error_class"`
-	LastSyncHTTPStatus  int    `json:"last_sync_http_status"`
-	HandshakeAgeS       *int   `json:"handshake_age_s,omitempty"`
-	WGPID               *int   `json:"wg_pid,omitempty"`
-	WGPort              *int   `json:"wg_port,omitempty"`
-	LeaseContainerCount *int   `json:"lease_container_count,omitempty"`
-	DiskFreeBytes       *int64 `json:"disk_free_bytes,omitempty"`
+	CertificationProtocols []string `json:"certification_protocols,omitempty"`
+	TunnelState            string   `json:"tunnel_state,omitempty"`
+	LastSyncAt             string   `json:"last_sync_at,omitempty"`
+	LastSyncErrorClass     string   `json:"last_sync_error_class"`
+	LastSyncHTTPStatus     int      `json:"last_sync_http_status"`
+	HandshakeAgeS          *int     `json:"handshake_age_s,omitempty"`
+	WGPID                  *int     `json:"wg_pid,omitempty"`
+	WGPort                 *int     `json:"wg_port,omitempty"`
+	LeaseContainerCount    *int     `json:"lease_container_count,omitempty"`
+	DiskFreeBytes          *int64   `json:"disk_free_bytes,omitempty"`
 	// ModelCacheBytes is the sum of GGUF files in the model cache.
 	// ModelCacheEvictableBytes excludes the loaded model and any model
 	// backing an active lease. Both are omitted when the cache cannot
@@ -142,6 +143,9 @@ type HostHealth struct {
 	ModelCacheAvailableBytes *int64   `json:"model_cache_available_bytes,omitempty"`
 	ModelCacheBytes          *int64   `json:"model_cache_bytes,omitempty"`
 	ModelCacheEvictableBytes *int64   `json:"model_cache_evictable_bytes,omitempty"`
+	BuildVersion             string   `json:"build_version,omitempty"`
+	BuildNumber              int      `json:"build_number,omitempty"`
+	BuildChannel             string   `json:"build_channel,omitempty"`
 	BuildCommit              string   `json:"build_commit,omitempty"`
 	// HostType is model or supervisor. The agent always sets it so a
 	// supervisor is not offered as a normal device.
@@ -208,6 +212,7 @@ type ModelConfiguration struct {
 }
 
 type Job struct {
+	MeasurementProtocol        string                `json:"measurement_protocol,omitempty"`
 	TrustedMeter               *trustedmeter.Binding `json:"trusted_meter,omitempty"`
 	CertificationContextTokens int                   `json:"certification_context_tokens,omitempty"`
 	EnvironmentHash            string                `json:"environment_hash,omitempty"`
