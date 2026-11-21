@@ -106,6 +106,7 @@ func main() {
 		}
 	}
 
+	configureQualification(&cfg)
 	a, err := agent.New(cfg, log)
 	if err != nil {
 		log.Error("could not start on this box", "err", err)
