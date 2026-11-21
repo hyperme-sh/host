@@ -29,3 +29,26 @@ func TestReadHaloNativePlanAcceptsApprovedSeparateInstallationPlan(t *testing.T)
 		t.Fatal("accepted a separately installed plan with the wrong digest")
 	}
 }
+
+func TestHaloKernelCleanupKeepsRunningAndRuntimePackagesProtected(t *testing.T) {
+	var plan SetupPlan
+	plan.Platform.Kernel = "7.3.0-10-generic"
+	for _, name := range []string{
+		"linux-headers-7.3.0-9", "linux-main-modules-zfs-7.3.0-9-generic",
+		"linux-image-unsigned-7.3.0-9-generic",
+		"linux-headers-7.3.0-10", "linux-modules-7.3.0-10-generic",
+		"linux-generic", "libvulkan1", "mesa-vulkan-drivers",
+	} {
+		plan.Platform.ProtectedPackages = append(plan.Platform.ProtectedPackages, PackageChange{Name: name, To: "expected"})
+	}
+	installed := map[string]string{"linux-image-unsigned-7.3.0-9-generic": "changed"}
+	got := haloProtectedPackagesAfterKernelCleanup(plan, installed)
+	if len(got) != 6 || got[0].Name != "linux-image-unsigned-7.3.0-9-generic" {
+		t.Fatalf("unexpected protected package set: %v", got)
+	}
+	for i, pkg := range plan.Platform.ProtectedPackages[2:] {
+		if got[i] != pkg {
+			t.Fatalf("protected check lost for %s", pkg.Name)
+		}
+	}
+}
