@@ -769,9 +769,13 @@ func (a *Agent) pullAndRun(ctx context.Context) error {
 	posture := a.effectiveSell()
 	if a.cfg.RunPendingQualification != nil && posture.SellState == "paused" &&
 		a.currentLease() == nil && !a.pendingResult.Load() {
-		if err := a.cfg.RunPendingQualification(ctx, a.cfg, a.state); err != nil {
-			a.log.Warn("benchmark pickup or collection did not complete")
+		a.maintenanceMu.Lock()
+		if !a.maintenanceHeld() {
+			if err := a.cfg.RunPendingQualification(ctx, a.cfg, a.state); err != nil {
+				a.log.Warn("benchmark pickup or collection did not complete")
+			}
 		}
+		a.maintenanceMu.Unlock()
 	}
 	job, err := a.client.PullJob(ctx, a.state.DeviceID)
 	if err != nil {

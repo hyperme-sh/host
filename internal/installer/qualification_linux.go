@@ -280,7 +280,12 @@ func collectQualification(ctx context.Context, p certificationPlan, identity reg
 				return modelBytes(ctx, modelTransport(token), address, token)
 			})
 		},
-		Tunnel: func(ctx context.Context) error { return certTunnel(ctx, p, identity, c) },
+		Tunnel: func(ctx context.Context) error {
+			if j.ClaimID == "" {
+				return certTunnel(ctx, p, identity, c)
+			}
+			return agentQualificationTunnel(ctx, p, identity, c)
+		},
 		Sample: func(ctx context.Context, measurementID string) (hostregistration.QualificationSample, error) {
 			fmt.Fprintf(out, "Running measurement %d/3…\n", len(j.Report.Samples)+1)
 			return qualificationSample(ctx, p, measurementID)
@@ -347,9 +352,6 @@ func RunPendingQualification(ctx context.Context, cfg agent.Config, state agent.
 		if _, err := os.Lstat(filepath.Join(cfg.StateDir, "lease.json")); !os.IsNotExist(err) {
 			return fmt.Errorf("local lease must be reconciled before benchmark execution")
 		}
-		if _, err := net.InterfaceByName("hypermesh"); err == nil {
-			return fmt.Errorf("benchmark tunnel probe requires the existing interface to be inactive")
-		}
 		_, err := registrationPreflight(ctx, p.Agent, identity.Request.ClassID)
 		return err
 	}
@@ -361,17 +363,15 @@ func RunPendingQualification(ctx context.Context, cfg agent.Config, state agent.
 	if err != nil || run == nil {
 		return err
 	}
-	// Give collection and cleanup their full bounded window before Plane can
-	// release the benchmark's exclusion at plan expiry.
-	if time.Until(run.ExpiresAt) < 65*time.Minute {
-		return nil
-	}
-	if err := check(ctx); err != nil {
-		return err
-	}
 	path := filepath.Join(defaultSetupState, "qualification-"+run.RunID+".json")
 	var j qualificationJournal
 	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		if time.Until(run.ExpiresAt) < 65*time.Minute {
+			return nil
+		}
+		if err := check(ctx); err != nil {
+			return err
+		}
 		claim, err := hostregistration.NewRunID()
 		if err != nil {
 			return err
@@ -397,10 +397,44 @@ func RunPendingQualification(ctx context.Context, cfg agent.Config, state agent.
 		}
 		j.Run = *run
 	}
+	if j.State == "approved" && time.Until(run.ExpiresAt) < 65*time.Minute {
+		return nil
+	}
 	if err := c.ClaimQualification(ctx, identity.Request, state.DeviceID, state.DeviceSecret, *run, j.ClaimID); err != nil {
 		return err
 	}
 	return collectQualification(ctx, p, identity, c, &j, path, "", io.Discard, check)
+}
+
+// Reuse the assigned idle tunnel when the agent has already configured it.
+func agentQualificationTunnel(ctx context.Context, p certificationPlan, identity registrationJournal, c *hostregistration.Client) error {
+	const iface = "hypermesh"
+	if _, err := net.InterfaceByName(iface); err != nil {
+		return certTunnel(ctx, p, identity, c)
+	}
+	receipt, err := c.PrepareTunnel(ctx, identity.Request, identity.DeviceID, identity.DeviceSecret)
+	if err != nil {
+		return err
+	}
+	allocation := receipt.Tunnel
+	public := identity.Request.WGPublicKey
+	if err := allocation.Validate(public); err != nil {
+		return err
+	}
+	probe := newWireguardProbe()
+	key, err := probe.run(ctx, "wg", "show", iface, "public-key")
+	if err != nil || strings.TrimSpace(string(key)) != public {
+		return fmt.Errorf("benchmark tunnel is not bound to the installed host key")
+	}
+	if _, err := probe.run(ctx, "ping", "-n", "-I", iface, "-c", "1", "-W", "1", allocation.ProbeAddress); err != nil {
+		return fmt.Errorf("assigned benchmark tunnel did not return the probe")
+	}
+	now := probe.now()
+	raw, err := probe.run(ctx, "wg", "show", iface, "latest-handshakes")
+	if err != nil || !peerHandshake(raw, allocation.ServerPublicKey, now.Add(-3*time.Minute), now) {
+		return fmt.Errorf("assigned benchmark gateway handshake is stale or differs")
+	}
+	return nil
 }
 
 func validQualificationCheckpoint(j qualificationJournal) bool {
