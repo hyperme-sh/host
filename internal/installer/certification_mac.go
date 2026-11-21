@@ -339,17 +339,17 @@ func macNativeInstallation(ctx context.Context, d nativeDeps, state, registratio
 		return nativeInstallation{}, fmt.Errorf("native certification requires the current inactive Mac registration")
 	}
 	check := func(ctx context.Context) error {
-		current, _, e := macSnapshot(ctx, d.registration, config)
+		current, hardware, e := macSnapshot(ctx, d.registration, config)
 		if e != nil {
 			return e
 		}
-		if current != registrationSHA {
-			return fmt.Errorf("installed Mac configuration differs")
+		_, managed := nativeAutomatic(ctx)
+		if e = validateMacNativeSnapshot(current, registrationSHA, hardware, j.Request.Hardware, managed); e != nil {
+			return e
 		}
 		if e = macIdentity(d.registration, j, false); e != nil {
 			return e
 		}
-		_, managed := nativeAutomatic(ctx)
 		if e = macServices(ctx, d.registration, managed, false); e != nil {
 			return e
 		}
@@ -359,6 +359,20 @@ func macNativeInstallation(ctx context.Context, d nativeDeps, state, registratio
 		return nil
 	}
 	return nativeInstallation{journal: j, plane: config.ControlPlane, tenant: config.Tenant, check: check}, nil
+}
+
+// The original registration digest includes installed binary bytes. For a
+// running agent, the frozen Plane workload separately pins the collector build.
+func validateMacNativeSnapshot(current, registered string, hardware, original hostregistration.Hardware, managed bool) error {
+	if current == registered {
+		return nil
+	}
+	hardware.ModelMemoryBytes = 0
+	original.ModelMemoryBytes = 0
+	if !managed || hardware != original {
+		return fmt.Errorf("installed Mac configuration differs")
+	}
+	return nil
 }
 
 func printNativePlan(out io.Writer, path string, p nativePlan) int {

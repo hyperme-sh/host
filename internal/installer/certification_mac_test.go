@@ -345,3 +345,19 @@ func TestNativeVulkanEvidenceBindsBothHaloClasses(t *testing.T) {
 		})
 	}
 }
+
+func TestManagedMacNativeSnapshotAllowsUpdatedCollectorOnSameHardware(t *testing.T) {
+	original := hostregistration.Hardware{CPU: "Apple M5 Pro", SystemMemoryBytes: 64 << 30, ModelMemoryBytes: 40 << 30}
+	current := original
+	current.ModelMemoryBytes = 36 << 30
+	if err := validateMacNativeSnapshot("current", "registered", current, original, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateMacNativeSnapshot("current", "registered", current, original, false); err == nil {
+		t.Fatal("manual path accepted a changed registration snapshot")
+	}
+	current.CPU = "Apple M5 Max"
+	if err := validateMacNativeSnapshot("current", "registered", current, original, true); err == nil {
+		t.Fatal("managed path accepted different hardware")
+	}
+}
