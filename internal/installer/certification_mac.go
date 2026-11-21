@@ -339,17 +339,14 @@ func macNativeInstallation(ctx context.Context, d nativeDeps, state, registratio
 		return nativeInstallation{}, fmt.Errorf("native certification requires the current inactive Mac registration")
 	}
 	check := func(ctx context.Context) error {
-		current, _, e := macSnapshot(ctx, d.registration, config)
-		if e != nil {
+		_, managed := nativeAutomatic(ctx)
+		if e := checkMacNativeSnapshot(ctx, d.registration, config, state, registrationSHA, managed); e != nil {
 			return e
 		}
-		if current != registrationSHA {
-			return fmt.Errorf("installed Mac configuration differs")
-		}
+		var e error
 		if e = macIdentity(d.registration, j, false); e != nil {
 			return e
 		}
-		_, managed := nativeAutomatic(ctx)
 		if e = macServices(ctx, d.registration, managed, false); e != nil {
 			return e
 		}
@@ -359,6 +356,28 @@ func macNativeInstallation(ctx context.Context, d nativeDeps, state, registratio
 		return nil
 	}
 	return nativeInstallation{journal: j, plane: config.ControlPlane, tenant: config.Tenant, check: check}, nil
+}
+
+func checkMacNativeSnapshot(ctx context.Context, d macRegistrationDeps, config macRegistrationConfig, state, registered string, managed bool) error {
+	current, _, err := macSnapshot(ctx, d, config)
+	if err != nil {
+		return err
+	}
+	if current == registered {
+		return nil
+	}
+	// Reproduce the original digest with its authenticated agent hash.
+	// All other inputs still come from the current installation.
+	if managed {
+		prior, err := macRead(filepath.Join(state, "registration-"+registered+".json.agent-sha256"), 0600, 64)
+		if err == nil && macSHA.Match(prior) {
+			reconstructed, _, err := macSnapshotWithAgent(ctx, d, config, string(prior))
+			if err == nil && reconstructed == registered {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("installed Mac configuration differs")
 }
 
 func printNativePlan(out io.Writer, path string, p nativePlan) int {
