@@ -701,3 +701,25 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
+
+func TestJobPullForbiddenReasons(t *testing.T) {
+	for _, tc := range []struct {
+		detail string
+		want   error
+	}{
+		{"Host intake and certification must pass before workload dispatch", ErrJobIntake},
+		{"A current assigned recertification job is required", ErrNoAssignedRecertification},
+		{"Device credential does not match device_id", ErrSecretMismatch},
+		{"Machine token belongs to another host", ErrSecretMismatch},
+	} {
+		t.Run(tc.detail, func(t *testing.T) {
+			body, err := json.Marshal(map[string]string{"detail": tc.detail})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := mapStatus(http.MethodGet, PathJobs, http.StatusForbidden, body, nil); got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
