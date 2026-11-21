@@ -232,7 +232,14 @@ func registrationPreflight(ctx context.Context,p agentInstallPlan,class string)(
 func registrationPreflightSetup(ctx context.Context,p agentInstallPlan,class string,setup SetupPlan)(Plan,error) {
  var fresh Plan
  deps:=setupApplyDeps{Source:setupSource{},Preflight:func(ctx context.Context,plan SetupPlan)(Plan,error){var err error;fresh,err=freshSetupPreflight(ctx,plan);return fresh,err}}
- remaining,target,err:=validateSetupHostPackages(ctx,setup,deps,registrationPackages)
+ packages:=registrationPackages
+ if _,managed:=nativeAutomatic(ctx);managed&&class==haloClass{
+  packages=func(p SetupPlan,installed map[string]string)([]PackageChange,error){
+   p.Platform.ProtectedPackages=haloProtectedPackagesAfterKernelCleanup(p,installed)
+   return registrationPackages(p,installed)
+  }
+ }
+ remaining,target,err:=validateSetupHostPackages(ctx,setup,deps,packages)
  if err==nil&&(len(remaining)>0||(p.Setup.HeadlessRequested&&target!="multi-user.target")){err=fmt.Errorf("approved prerequisites are incomplete")}
  if err==nil{err=registrationClass(class,fresh)}
  return fresh,err

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -75,6 +76,24 @@ func readHaloNativePlan(path, digest string) (agentInstallPlan, error) {
 		return plan, fmt.Errorf("installed Halo plan differs from the approved digest")
 	}
 	return plan, nil
+}
+
+var versionedUbuntuKernelPackage = regexp.MustCompile(
+	`^linux-(?:headers|image-unsigned|image|main-modules-v4l2loopback|main-modules-zfs|modules-extra|modules|tools)-([0-9]+\.[0-9]+\.[0-9]+-[0-9]+)(?:-[a-z0-9-]+)?$`,
+)
+
+func haloProtectedPackagesAfterKernelCleanup(p SetupPlan, installed map[string]string) []PackageChange {
+	running := strings.TrimSuffix(p.Platform.Kernel, "-generic")
+	protected := make([]PackageChange, 0, len(p.Platform.ProtectedPackages))
+	for _, pkg := range p.Platform.ProtectedPackages {
+		match := versionedUbuntuKernelPackage.FindStringSubmatch(packageBase(pkg.Name))
+		if installed[pkg.Name] == "" && len(match) == 2 && p.Platform.Kernel == running+"-generic" &&
+			match[1] != running {
+			continue
+		}
+		protected = append(protected, pkg)
+	}
+	return protected
 }
 
 func haloNativeInstallation(_ context.Context, digest, agentPlanPath string) (nativeInstallation, error) {
