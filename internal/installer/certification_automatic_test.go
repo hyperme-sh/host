@@ -33,3 +33,14 @@ func TestAutomaticNativeInputs(t *testing.T) {
 		})
 	}
 }
+
+func TestMissingNativeInputFileUsesEnvironment(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+	t.Setenv("HYPERMESH_NATIVE_REGISTRATION_PLAN_SHA", digest)
+	t.Setenv("HYPERMESH_NATIVE_MODEL_FILE", "/var/lib/model.gguf")
+	t.Setenv("HYPERMESH_NATIVE_RUNTIME_FILE", "/usr/bin/llama-bench")
+	inputs, err := readNativeProvisionedInputs(t.TempDir())
+	if err != nil || inputs.Registration != digest || inputs.Model != "/var/lib/model.gguf" {
+		t.Fatalf("expected provisioned environment fallback: %v", err)
+	}
+}

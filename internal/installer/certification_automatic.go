@@ -32,11 +32,14 @@ type nativeProvisionedInputs struct {
 
 func readNativeProvisionedInputs(dir string) (nativeProvisionedInputs, error) {
 	var provisioned nativeProvisionedInputs
-	raw, err := macRead(filepath.Join(dir, "native-certification.json"), 0600, 16<<10)
-	if os.IsNotExist(err) {
+	path := filepath.Join(dir, "native-certification.json")
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
 		provisioned.Registration, provisioned.Model, provisioned.Runtime, err = automaticNativeInputs()
 		return provisioned, err
+	} else if err != nil {
+		return provisioned, err
 	}
+	raw, err := macRead(path, 0600, 16<<10)
 	if err != nil {
 		return provisioned, err
 	}
