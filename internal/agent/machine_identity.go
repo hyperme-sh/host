@@ -21,10 +21,14 @@ func machineAPIClient(cfg Config) *api.Client {
 	c := api.NewClient(cfg.ControlPlaneURL, cfg.TenantID)
 	p := machineidentity.Provider{Path: machineIdentityPath(cfg)}
 	c.Credential = func(ctx context.Context) (string, error) {
-		if cfg.ManagedDeviceID != "" {
-			return p.Token(ctx, cfg.ControlPlaneURL, cfg.TenantID, c.DeviceID, c.DeviceID, c.DeviceSecret)
+		token, err := p.ExistingToken(ctx, cfg.ControlPlaneURL, cfg.TenantID, c.DeviceID, c.DeviceSecret)
+		if err != nil || cfg.ManagedDeviceID == "" || token != c.DeviceSecret {
+			return token, err
 		}
-		return p.ExistingToken(ctx, cfg.ControlPlaneURL, cfg.TenantID, c.DeviceID, c.DeviceSecret)
+		// Managed token-enrolled hosts without a signing checkpoint use
+		// the device ID as their legacy first-binding context. An existing
+		// owner registration always retains the request in its checkpoint.
+		return p.Token(ctx, cfg.ControlPlaneURL, cfg.TenantID, c.DeviceID, c.DeviceID, c.DeviceSecret)
 	}
 	c.InvalidateCredential = p.Invalidate
 	return c
