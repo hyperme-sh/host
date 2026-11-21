@@ -14,17 +14,25 @@ import (
 	"github.com/FyberLabs/hypermesh-host/internal/agent"
 )
 
+func automaticNativeInputs() (registration, model, binary string, err error) {
+	registration = os.Getenv("HYPERMESH_NATIVE_REGISTRATION_PLAN_SHA")
+	model = os.Getenv("HYPERMESH_NATIVE_MODEL_FILE")
+	binary = os.Getenv("HYPERMESH_NATIVE_RUNTIME_FILE")
+	if !macSHA.MatchString(registration) || !filepath.IsAbs(model) || !filepath.IsAbs(binary) {
+		err = fmt.Errorf("native certification inputs are not provisioned")
+	}
+	return
+}
+
 // RunAutomaticNative reads deployment-provisioned pinned inputs. It uses the
 // same private journal and evidence checks as the manual native collector.
 func RunAutomaticNative(ctx context.Context, cfg agent.Config, state agent.State, shape string) error {
 	if !strings.HasPrefix(shape, "sha256:") || !macSHA.MatchString(strings.TrimPrefix(shape, "sha256:")) {
 		return fmt.Errorf("invalid automatic native shape")
 	}
-	registration := os.Getenv("HYPERMESH_NATIVE_REGISTRATION_PLAN_SHA")
-	model := os.Getenv("HYPERMESH_NATIVE_MODEL_FILE")
-	binary := os.Getenv("HYPERMESH_NATIVE_RUNTIME_FILE")
-	if !macSHA.MatchString(registration) || !filepath.IsAbs(model) || !filepath.IsAbs(binary) {
-		return fmt.Errorf("native certification inputs are not provisioned")
+	registration, model, binary, err := automaticNativeInputs()
+	if err != nil {
+		return err
 	}
 	dir := macPath("", filepath.Join(cfg.StateDir, "native-automatic"))
 	if err := macDirectory(dir, true, true); err != nil {
@@ -37,7 +45,7 @@ func RunAutomaticNative(ctx context.Context, cfg agent.Config, state agent.State
 	}
 	path := prefix + time.Now().UTC().Format("20060102T150405.000000000") + ".json"
 	for i := len(matches) - 1; i >= 0; i-- {
-		if strings.HasSuffix(matches[i], ".evidence.json") {
+		if strings.HasSuffix(matches[i], ".evidence.json") || strings.HasSuffix(matches[i], ".result.json") {
 			continue
 		}
 		raw, err := nativeRead(matches[i])
