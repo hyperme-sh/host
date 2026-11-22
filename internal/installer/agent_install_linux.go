@@ -113,7 +113,7 @@ func agentPayloads(p agentInstallPlan, binary []byte)[]agentPayload {
 	for _,v:=range values {env+=v[0]+"="+agentEnvValue(v[1])+"\n"}
 	unit:="[Unit]\nDescription=Hypermesh host agent\nAfter=network-online.target docker.service\nWants=network-online.target\n"
 	if p.Setup.WireGuardMode=="userspace" {unit+="Requires=hypermesh-wg.service\nAfter=hypermesh-wg.service\n"}
-	unit+="ConditionPathExists=/var/lib/hypermesh/activation-approved\n\n[Service]\nType=simple\nUser=root\nEnvironmentFile=/etc/hypermesh/agent.env\nExecStartPre=/usr/local/lib/hypermesh/update-rollback\nExecStart=/usr/local/bin/hypermesh-agent\nRestart=on-failure\nRestartSec=5\nKillMode=control-group\n\n[Install]\nWantedBy=multi-user.target\n"
+	unit+="ConditionPathExists=/var/lib/hypermesh/activation-approved\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\nUser=root\nEnvironmentFile=/etc/hypermesh/agent.env\nExecStartPre=/usr/local/lib/hypermesh/update-rollback\nExecStart=/usr/local/bin/hypermesh-agent\nRestart=on-failure\nRestartSec=15\nKillMode=control-group\n\n[Install]\nWantedBy=multi-user.target\n"
 	var files []agentPayload
 	add:=func(path string,data []byte,mode uint32){files=append(files,agentPayload{agentFile{path,digestSetupBytes(data),mode},data})}
 	add("/usr/local/bin/hypermesh-agent",binary,0o755)
