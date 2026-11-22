@@ -28,6 +28,7 @@ import (
 func TestHealthProbeDoesNotBlockLaterHeartbeats(t *testing.T) {
 	dir := t.TempDir()
 	a := newTestAgent(t, "http://127.0.0.1", dir, filepath.Join(dir, "uptime"), "", "")
+	a.cfg.GGUFPath = filepath.Join(dir, "models", "model.gguf")
 	started := make(chan struct{})
 	unblock := make(chan struct{})
 	t.Cleanup(func() {
