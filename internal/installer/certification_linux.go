@@ -116,7 +116,7 @@ func RunPlanCertification(ctx context.Context,args []string,out,diagnostic io.Wr
  if err==nil&&agentPlanDigest(p.Agent)!=p.Agent.SHA256{err=fmt.Errorf("agent plan digest differs")}
  if err!=nil{fmt.Fprintln(diagnostic,err);return 1}
  state:=certificationSetupState(forum)
- unlock,err:=lockSetupState(state);if err!=nil{fmt.Fprintln(diagnostic,err);return 1};defer unlock()
+ unlock,err:=lockSetupState(certificationLockState(forum));if err!=nil{fmt.Fprintln(diagnostic,err);return 1};defer unlock()
  var j registrationJournal
  if forum {
   j,err=readForumCertificationIdentity(p.Agent)
@@ -205,7 +205,7 @@ func runScopedCertificationCommand(ctx context.Context,args []string,out,diagnos
  if err==nil{err=validateScopedCertificationPlan(p,*approved,forum)}
  if err!=nil{fmt.Fprintln(diagnostic,err);return 1}
  state:=certificationSetupState(forum)
- unlock,err:=lockSetupState(state);if err!=nil{fmt.Fprintln(diagnostic,err);return 1};defer unlock()
+ unlock,err:=lockSetupState(certificationLockState(forum));if err!=nil{fmt.Fprintln(diagnostic,err);return 1};defer unlock()
  ctx,cancel:=context.WithTimeout(ctx,45*time.Minute);defer cancel()
  identity,c,err:=scopedCertificationIdentity(p,forum)
  if err!=nil{fmt.Fprintln(diagnostic,err);return 1}
@@ -215,6 +215,9 @@ func runScopedCertificationCommand(ctx context.Context,args []string,out,diagnos
   raw,err=readSetupRegular(journalPath,true);if err==nil{err=decodeSetupJSON(raw,&j)}
   if err!=nil||!validCertificationJournal(j)||j.PlanSHA256!=p.SHA256||j.RunID!=p.Run.RunID{fmt.Fprintln(diagnostic,"invalid certification journal; preserve state");return 1}
  }else if !os.IsNotExist(e){fmt.Fprintln(diagnostic,"cannot inspect certification state");return 1}
+ if forum && supportOneOf(j.State,"passed","evidence-ready") {
+  if err=scopedCertificationPreflight(ctx,p,identity,true);err!=nil{fmt.Fprintln(diagnostic,err);return 1}
+ }
  save:=func(v certificationJournal)error{return saveCertification(journalPath,v)}
  if activate {
   err=activateCertified(ctx,p,identity,c,&j,save,diagnostic)

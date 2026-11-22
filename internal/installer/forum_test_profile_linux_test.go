@@ -104,6 +104,9 @@ func TestJ4012ForumCertificationPinsTheSeparateQwenArtifact(t *testing.T) {
 	if certificationSetupState(true) != forumState+"/installer" || certificationSetupState(false) == certificationSetupState(true) {
 		t.Fatal("certification must keep its journal in the dedicated TEST profile")
 	}
+	if certificationLockState(true) != forumTestProfile.state || certificationLockState(false) != defaultSetupState {
+		t.Fatal("certification must take the same lock as its installer")
+	}
 	var output, diagnostic bytes.Buffer
 	if code := RunActivateAgent(context.Background(), []string{"--forum-test"}, &output, &diagnostic); code != 2 {
 		t.Fatalf("activation accepted the forum TEST selector: %s", diagnostic.String())

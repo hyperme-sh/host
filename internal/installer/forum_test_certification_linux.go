@@ -25,6 +25,13 @@ func certificationSetupState(forum bool) string {
 	return defaultSetupState
 }
 
+func certificationLockState(forum bool) string {
+	if forum {
+		return forumTestProfile.state
+	}
+	return defaultSetupState
+}
+
 func validateForumCertificationModel(p certificationPlan) error {
 	manifest := p.Run.Manifest
 	if p.Agent.TenantID != forumCertificationTenant || manifest.ClassID != forumTestProfile.class ||
