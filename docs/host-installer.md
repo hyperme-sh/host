@@ -2170,3 +2170,28 @@ Its stages are available separately for diagnostics.
    Plane participants to the same physical capacity slot through Infra. Start
    the TEST service after both Planes have the shared slot binding and the TEST
    WireGuard overlay is distinct from production.
+
+### J4012 forum TEST profile
+
+The s3r.ch TEST enrollment uses `/var/lib/hypermesh-forum-test` for state and
+models and `/etc/hypermesh-forum-test` for its runtime configuration. It uses
+the `wg-hm-forum` interface and port `8094`. The profile follows the moving
+TEST channel for its own agent binary.
+
+Use the existing signed TEST bundle and a reviewed prerequisite plan for
+J4012-1 with kernel WireGuard, no package changes, and
+`/var/lib/hypermesh-forum-test/models` as its model directory. Keep the
+prerequisite journal in `/var/lib/hypermesh-forum-test/installer`. Prepare
+the agent plan for the s3r.ch TEST tenant ID from Infra's fixture declaration.
+Use the same tenant ID and the reviewed agent plan hash for registration.
+
+```sh
+sudo hypermesh-host install-forum-test --tenant-id TENANT_UUID \
+  --plan FILE --approve-plan SHA256
+```
+
+Sign in with the scoped s3r.ch TEST host owner and approve the request through
+the normal device approval flow. The installer stages a paused enrollment
+and an inactive service. Preserve the private registration journal for retries.
+Activate the service after Infra has bound the returned device ID to the
+existing J4012-1 shared capacity slot.
