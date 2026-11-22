@@ -190,12 +190,12 @@ func TestHeartbeatHealthShape(t *testing.T) {
 	wantHealth := []string{
 		"tunnel_state", "last_sync_at", "last_sync_error_class", "last_sync_http_status",
 		"handshake_age_s", "wg_pid", "wg_port", "lease_container_count", "build_commit",
-		"host_type", "certification_protocols",
+		"host_type", "certification_protocols", "certification_series_v3",
 	}
 	if !sameKeys(health, wantHealth) {
 		t.Fatalf("health keys %s", top["health"])
 	}
-	if len(hb.Health.CertificationProtocols) != 1 || hb.Health.CertificationProtocols[0] != "sustained-decode-v2" {
+	if !hb.Health.CertificationSeriesV3 || len(hb.Health.CertificationProtocols) != 1 || hb.Health.CertificationProtocols[0] != "sustained-decode-v2" {
 		t.Fatal("missing versioned certification capability")
 	}
 	if hb.Health.TunnelState != tunnel.StateUp {

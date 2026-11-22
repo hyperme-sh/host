@@ -127,6 +127,7 @@ func TunnelHealthStates() []string {
 // an empty string when there is no class. last_sync_http_status is 0
 // when there is no status. A failed collection must not fail the heartbeat.
 type HostHealth struct {
+	CertificationSeriesV3  bool     `json:"certification_series_v3,omitempty"`
 	CertificationProtocols []string `json:"certification_protocols,omitempty"`
 	TunnelState            string   `json:"tunnel_state,omitempty"`
 	LastSyncAt             string   `json:"last_sync_at,omitempty"`
