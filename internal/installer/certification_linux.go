@@ -38,6 +38,9 @@ type certificationJournal struct {
 }
 func certificationDigest(p certificationPlan)string{p.SHA256="";raw,_:=json.Marshal(p);return digestSetupBytes(raw)}
 func validateCertificationPlan(p certificationPlan,approved string)error{
+ return validateScopedCertificationPlan(p,approved,false)
+}
+func validateScopedCertificationPlan(p certificationPlan,approved string,forum bool)error{
  if p.Schema!=1||p.SHA256!=approved||!setupDigestRE.MatchString(approved)||certificationDigest(p)!=approved||
   agentPlanDigest(p.Agent)!=p.Agent.SHA256||validateInstalledAgentInputs(p.Agent)!=nil||
   p.Run.Manifest.Validate()!=nil||!setupDigestRE.MatchString(p.Run.ManifestSHA256)||
@@ -49,6 +52,12 @@ func validateCertificationPlan(p certificationPlan,approved string)error{
  m:=p.Run.Manifest
  if _,err:=certificationURL(m.SourceRef);err!=nil{return err}
  expected:=filepath.Join(p.Agent.Setup.Preflight.Resources.ModelDirectory,"cache",strings.TrimPrefix(m.FileHash,"sha256:")+".gguf")
+ if forum {
+  if err:=validateForumCertificationModel(p);err!=nil{return err}
+  expected=forumCertificationModel
+ }else if p.Agent.SetupStateDir==certificationSetupState(true) {
+  return fmt.Errorf("forum TEST certification cannot use the default host path")
+ }
  if p.ModelPath!=expected{return fmt.Errorf("model destination is outside the approved content-addressed cache")}
  return nil
 }
@@ -94,6 +103,8 @@ func certTunnel(ctx context.Context,p certificationPlan,j registrationJournal,c 
 
 func RunPlanCertification(ctx context.Context,args []string,out,diagnostic io.Writer)int{
  if len(args)>0 && args[0]=="--halo-test" {return runHaloNativeCertification(ctx,args[1:],out,diagnostic,true)}
+ forum:=len(args)>0 && args[0]=="--forum-test"
+ if forum {args=args[1:]}
  f:=flag.NewFlagSet("plan-certification",flag.ContinueOnError);f.SetOutput(diagnostic)
  path:=f.String("agent-plan","","installed agent plan")
  if err:=f.Parse(args);err!=nil{if err==flag.ErrHelp{return 0};return 2}
@@ -104,21 +115,27 @@ func RunPlanCertification(ctx context.Context,args []string,out,diagnostic io.Wr
  if err==nil{err=validateInstalledAgentInputs(p.Agent)}
  if err==nil&&agentPlanDigest(p.Agent)!=p.Agent.SHA256{err=fmt.Errorf("agent plan digest differs")}
  if err!=nil{fmt.Fprintln(diagnostic,err);return 1}
- unlock,err:=lockSetupState(defaultSetupState);if err!=nil{fmt.Fprintln(diagnostic,err);return 1};defer unlock()
+ state:=certificationSetupState(forum)
+ unlock,err:=lockSetupState(state);if err!=nil{fmt.Fprintln(diagnostic,err);return 1};defer unlock()
  var j registrationJournal
- raw,err=readSetupRegular(registrationPath(defaultSetupState,p.Agent.SHA256),true)
- if err==nil{err=decodeSetupJSON(raw,&j)}
- if err==nil{err=validateRegistration(j,p.Agent,j.Issuer,j.Dashboard,j.Request.ClassID)}
- if err==nil&&j.State!="registered-inactive"{err=fmt.Errorf("complete inactive registration first")}
- if err==nil{err=certPreflight(ctx,p,j)}
+ if forum {
+  j,err=readForumCertificationIdentity(p.Agent)
+ }else{
+  raw,err=readSetupRegular(registrationPath(state,p.Agent.SHA256),true)
+  if err==nil{err=decodeSetupJSON(raw,&j)}
+  if err==nil{err=validateRegistration(j,p.Agent,j.Issuer,j.Dashboard,j.Request.ClassID)}
+  if err==nil&&j.State!="registered-inactive"{err=fmt.Errorf("complete inactive registration first")}
+ }
+ if err==nil{err=scopedCertificationPreflight(ctx,p,j,forum)}
  var c *hostregistration.Client
- if err==nil{c,err=newRegistrationClient(p.Agent.ControlPlane,p.Agent.TenantID)}
+ if err==nil{c,err=scopedCertificationClient(p.Agent,forum)}
  var id string
  if err==nil{id,err=hostregistration.NewRunID()}
  if err==nil{p.Run,err=c.PlanCertification(ctx,j.Request,j.DeviceID,j.DeviceSecret,id)}
  if err==nil{
   p.ModelPath=filepath.Join(p.Agent.Setup.Preflight.Resources.ModelDirectory,"cache",strings.TrimPrefix(p.Run.Manifest.FileHash,"sha256:")+".gguf")
-  p.SHA256=certificationDigest(p);err=validateCertificationPlan(p,p.SHA256)
+  if forum {p.ModelPath=forumCertificationModel}
+  p.SHA256=certificationDigest(p);err=validateScopedCertificationPlan(p,p.SHA256,forum)
  }
  if err!=nil{fmt.Fprintln(diagnostic,err);return 1}
  if json.NewEncoder(out).Encode(p)!=nil{return 1};return 0
@@ -161,12 +178,16 @@ func performCertification(ctx context.Context,p certificationPlan,j *certificati
 }
 func RunCertifyAgent(ctx context.Context,args []string,out,diagnostic io.Writer)int{
  if len(args)>0 && args[0]=="--halo-test" {return runHaloNativeCertification(ctx,args[1:],out,diagnostic,false)}
+ if len(args)>0 && args[0]=="--forum-test" {return runScopedCertificationCommand(ctx,args[1:],out,diagnostic,false,true)}
  return runCertificationCommand(ctx,args,out,diagnostic,false)
 }
 func RunActivateAgent(ctx context.Context,args []string,out,diagnostic io.Writer)int{
  return runCertificationCommand(ctx,args,out,diagnostic,true)
 }
 func runCertificationCommand(ctx context.Context,args []string,out,diagnostic io.Writer,activate bool)int{
+ return runScopedCertificationCommand(ctx,args,out,diagnostic,activate,false)
+}
+func runScopedCertificationCommand(ctx context.Context,args []string,out,diagnostic io.Writer,activate,forum bool)int{
  name:="certify-agent";if activate{name="activate-agent"}
  f:=flag.NewFlagSet(name,flag.ContinueOnError);f.SetOutput(diagnostic)
  path:=f.String("plan","","reviewed certification plan")
@@ -178,15 +199,17 @@ func runCertificationCommand(ctx context.Context,args []string,out,diagnostic io
  if f.NArg()!=0||*path==""||!setupDigestRE.MatchString(*approved)||(!activate&&!*run)||(activate&&!*start){
  fmt.Fprintln(diagnostic,"require --plan FILE --approve-plan SHA256 and --run (certify) or --start (activate)");return 2}
  if os.Geteuid()!=0{fmt.Fprintln(diagnostic,"requires root");return 1}
+ if forum && (activate || *tokenPath!=""){fmt.Fprintln(diagnostic,"forum TEST uses its installed model and permits certification only");return 2}
  var p certificationPlan
  raw,err:=readSetupRegular(*path,false);if err==nil{err=decodeSetupJSON(raw,&p)}
- if err==nil{err=validateCertificationPlan(p,*approved)}
+ if err==nil{err=validateScopedCertificationPlan(p,*approved,forum)}
  if err!=nil{fmt.Fprintln(diagnostic,err);return 1}
- unlock,err:=lockSetupState(defaultSetupState);if err!=nil{fmt.Fprintln(diagnostic,err);return 1};defer unlock()
+ state:=certificationSetupState(forum)
+ unlock,err:=lockSetupState(state);if err!=nil{fmt.Fprintln(diagnostic,err);return 1};defer unlock()
  ctx,cancel:=context.WithTimeout(ctx,45*time.Minute);defer cancel()
- identity,c,err:=readCertificationIdentity(p)
+ identity,c,err:=scopedCertificationIdentity(p,forum)
  if err!=nil{fmt.Fprintln(diagnostic,err);return 1}
- journalPath:=certificationStatePath(defaultSetupState,p.SHA256)
+ journalPath:=certificationStatePath(state,p.SHA256)
  var j certificationJournal
  if _,e:=os.Lstat(journalPath);e==nil{
   raw,err=readSetupRegular(journalPath,true);if err==nil{err=decodeSetupJSON(raw,&j)}
@@ -202,9 +225,10 @@ func runCertificationCommand(ctx context.Context,args []string,out,diagnostic io
   token,err=modelAccessToken(*tokenPath)
   if err==nil{
    d:=certificationDeps{
-    Preflight:func(ctx context.Context)error{return certPreflight(ctx,p,identity)},
+    Preflight:func(ctx context.Context)error{return scopedCertificationPreflight(ctx,p,identity,forum)},
     Acquire:func(ctx context.Context)error{
      if !p.Run.ExpiresAt.After(time.Now()){return fmt.Errorf("run expired")}
+     if forum{return verifyAcquiredModel(ctx,p.ModelPath,p.Run.Manifest.FileHash,p.Run.Manifest.SizeBytes)}
      if err:=agentDirectory(filepath.Dir(p.ModelPath),true);err!=nil{return err}
      address,err:=certificationURL(p.Run.Manifest.SourceRef);if err!=nil{return err}
      transfer,cancel:=context.WithTimeout(ctx,30*time.Minute);defer cancel()
@@ -215,8 +239,10 @@ func runCertificationCommand(ctx context.Context,args []string,out,diagnostic io
     Workload:func(ctx context.Context)(hostregistration.CertificationEvidence,error){
      m:=p.Run.Manifest
      request:=agent.WorkloadPreflight{PlanSHA256:p.SHA256,CatalogID:m.CatalogID,ImageDigest:m.ImageDigest,ModelPath:p.ModelPath,FileHash:m.FileHash,ContextTokens:m.ContextTokens,FullContext:true,SuiteID:m.SuiteID}
-     config,err:=os.MkdirTemp(defaultSetupState,".certification-docker-");if err!=nil{return hostregistration.CertificationEvidence{},err};defer os.RemoveAll(config)
-     receipt,err:=agent.RunWorkloadPreflight(ctx,request,"/var/lib/hypermesh",func(ctx context.Context,_ string,args ...string)([]byte,error){return workloadDocker(ctx,config,args...)})
+     config,err:=os.MkdirTemp(state,".certification-docker-");if err!=nil{return hostregistration.CertificationEvidence{},err};defer os.RemoveAll(config)
+     workloadState:="/var/lib/hypermesh"
+     if forum {workloadState=forumState}
+     receipt,err:=agent.RunWorkloadPreflight(ctx,request,workloadState,func(ctx context.Context,_ string,args ...string)([]byte,error){return workloadDocker(ctx,config,args...)})
      if err!=nil||receipt.ContextFit==nil||!receipt.ContextFit.ValidFor(m.ContextTokens)||!receipt.CleanupComplete{return hostregistration.CertificationEvidence{},fmt.Errorf("workload evidence incomplete")}
      return hostregistration.CertificationEvidence{HostImageHash:receipt.HostImageHash,FileHash:m.FileHash,ImageDigest:m.ImageDigest,
       SampleMS:receipt.SampleMS,TokensPerSecond:receipt.TokensPerSecond,ThermalC:receipt.ThermalC,

@@ -236,6 +236,7 @@ Commands:
   qualify-host      run an operator-authorized initial lab baseline; --run-id UUID
   plan-certification  obtain an authenticated frozen model/runtime plan; --agent-plan FILE
   certify-agent  acquire and certify while inactive; --plan FILE --approve-plan SHA256 --run
+                 Use --forum-test first to certify the installed J4012 TEST model and its separate enrollment.
   activate-agent  start the certified service; selling starts once startup is verified; --plan FILE --approve-plan SHA256 --start
   plan-workload  review explicit local model/runtime pins; use --help.
   check-workload  run approved inference with host services inactive.

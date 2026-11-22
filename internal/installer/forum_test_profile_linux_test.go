@@ -3,12 +3,15 @@
 package installer
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/FyberLabs/hypermesh-host/internal/agent"
 	"github.com/FyberLabs/hypermesh-host/internal/hardware"
+	"github.com/FyberLabs/hypermesh-host/internal/hostregistration"
 )
 
 func TestJ4012ForumProfileUsesAnIndependentPausedEnrollment(t *testing.T) {
@@ -24,7 +27,7 @@ func TestJ4012ForumProfileUsesAnIndependentPausedEnrollment(t *testing.T) {
 	plan := agentInstallPlan{ControlPlane: network.Plane, Channel: "test", HostName: "J4012-1",
 		TenantID: "afee9b29-1706-5590-bbbf-e58df8945ac0", SetupStateDir: forumState + "/installer",
 		Setup: SetupPlan{Profile: &SetupProfile{ID: "ubuntu-jetson"}, Preflight: fresh,
-			ReadinessURL: network.Plane + "/api/v1/hypermesh/public/host-installation",
+			ReadinessURL:  network.Plane + "/api/v1/hypermesh/public/host-installation",
 			WireGuardMode: "kernel"}}
 	if err := validateForumTestScope(plan, network.Issuer, network.Dashboard, fresh); err != nil {
 		t.Fatal(err)
@@ -70,5 +73,39 @@ func TestJ4012ForumProfileUsesAnIndependentPausedEnrollment(t *testing.T) {
 				t.Fatal("plan outside the dedicated TEST profile was accepted")
 			}
 		})
+	}
+}
+
+func TestJ4012ForumCertificationPinsTheSeparateQwenArtifact(t *testing.T) {
+	plan := certificationPlan{
+		Agent: agentInstallPlan{TenantID: forumCertificationTenant},
+		Run: hostregistration.CertificationRun{Manifest: hostregistration.CertificationManifest{
+			ClassID: "nx-volume", CatalogID: "qwen-2.5-7b-q4", FileHash: "sha256:" + forumCertificationDigest,
+			SizeBytes: 4683074240, FullContext: true,
+		}},
+	}
+	if err := validateForumCertificationModel(plan); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*certificationPlan){
+		"canonical tenant": func(p *certificationPlan) { p.Agent.TenantID = "8f8e8d8c-7b6a-4a59-8c3d-2e1f0a9b8c7d" },
+		"other model":      func(p *certificationPlan) { p.Run.Manifest.CatalogID = "llama-3-1-8b" },
+		"other bytes":      func(p *certificationPlan) { p.Run.Manifest.FileHash = "sha256:" + strings.Repeat("a", 64) },
+		"partial context":  func(p *certificationPlan) { p.Run.Manifest.FullContext = false },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := plan
+			change(&bad)
+			if err := validateForumCertificationModel(bad); err == nil {
+				t.Fatal("accepted a workload outside the forum TEST pins")
+			}
+		})
+	}
+	if certificationSetupState(true) != forumState+"/installer" || certificationSetupState(false) == certificationSetupState(true) {
+		t.Fatal("certification must keep its journal in the dedicated TEST profile")
+	}
+	var output, diagnostic bytes.Buffer
+	if code := RunActivateAgent(context.Background(), []string{"--forum-test"}, &output, &diagnostic); code != 2 {
+		t.Fatalf("activation accepted the forum TEST selector: %s", diagnostic.String())
 	}
 }
