@@ -27,13 +27,13 @@ const (
 )
 
 type isolatedTestProfile struct {
-	description, class, state, config, unit, wireguard, port, context, updateChannel string
+	description, class, state, config, unit, wireguard, port, context string
 	validate                                                                         func(agentInstallPlan, string, string, Plan) error
 }
 
 var haloTestProfile = isolatedTestProfile{
 	description: "Halo TEST", class: haloClass, state: haloState, config: haloConfig, unit: haloUnit,
-	wireguard: "wg-hm-halo-test", port: "8080", context: "32768", updateChannel: "test",
+	wireguard: "wg-hm-halo-test", port: "8080", context: "32768",
 	validate: validateHaloScope,
 }
 
@@ -91,7 +91,7 @@ func isolatedTestAgent(p agentInstallPlan, j registrationJournal, profile isolat
 		{"HYPERMESH_WG_IFACE", profile.wireguard},
 		{"HYPERMESH_LISTEN_PORT", profile.port},
 		{"HYPERMESH_LLAMA_CTX_SIZE", profile.context},
-		{"HYPERMESH_UPDATE_CHANNEL", profile.updateChannel},
+		{"HYPERMESH_UPDATE_CHANNEL", "test"},
 		{"HYPERMESH_UPDATE_PUBKEY", profile.config + "/update-pubkey.asc"},
 		{"HYPERMESH_UPDATE_FINGERPRINTS", strings.Join(p.Fingerprints, ",")},
 		{"HYPERMESH_UPDATE_BINARY", binary},

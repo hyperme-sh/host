@@ -50,7 +50,7 @@ func TestJ4012ForumProfileUsesAnIndependentPausedEnrollment(t *testing.T) {
 		}
 	}
 	for _, entry := range []string{`HYPERMESH_WG_IFACE="wg-hm-forum"`, `HYPERMESH_LISTEN_PORT="8094"`,
-		`HYPERMESH_UPDATE_CHANNEL=""`, `HYPERMESH_LLAMA_CTX_SIZE="4096"`} {
+		`HYPERMESH_UPDATE_CHANNEL="test"`, `HYPERMESH_LLAMA_CTX_SIZE="4096"`} {
 		if !strings.Contains(string(files[3].Data), entry+"\n") {
 			t.Errorf("missing independent runtime setting %s", entry)
 		}

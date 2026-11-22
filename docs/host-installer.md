@@ -2175,8 +2175,8 @@ Its stages are available separately for diagnostics.
 
 The s3r.ch TEST enrollment uses `/var/lib/hypermesh-forum-test` for state and
 models and `/etc/hypermesh-forum-test` for its runtime configuration. It uses
-the `wg-hm-forum` interface and port `8094`. Automatic binary updates are
-disabled for this profile.
+the `wg-hm-forum` interface and port `8094`. The profile follows the moving
+TEST channel for its own agent binary.
 
 Use the existing signed TEST bundle and a reviewed prerequisite plan for
 J4012-1 with kernel WireGuard, no package changes, and
