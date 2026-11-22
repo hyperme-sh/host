@@ -25,7 +25,7 @@ func (a *Agent) retrySustained(ctx context.Context, job api.Job) (bool, error) {
 		return true, err
 	}
 	var body api.SustainedResult
-	if len(raw) > 65536 || json.Unmarshal(raw, &body) != nil || body.JobID != job.JobID || body.DeviceID != a.state.DeviceID || body.EnvironmentHash != job.EnvironmentHash || body.MeasurementProtocol != pathb.SustainedDecodeProtocol {
+	if len(raw) > 65536 || json.Unmarshal(raw, &body) != nil || body.JobID != job.JobID || body.DeviceID != a.state.DeviceID || body.EnvironmentHash != job.EnvironmentHash || body.MeasurementProtocol != job.MeasurementProtocol {
 		return true, fmt.Errorf("saved certification result does not match assignment")
 	}
 	if err := a.client.PostSustainedResult(ctx, body); err != nil {
@@ -38,7 +38,7 @@ func (a *Agent) postSustained(ctx context.Context, job api.Job, result pathb.Res
 		result.EnvironmentHash = job.EnvironmentHash
 	}
 	body := api.SustainedResult{DeviceID: a.state.DeviceID, JobID: job.JobID,
-		EnvironmentHash: result.EnvironmentHash, MeasurementProtocol: pathb.SustainedDecodeProtocol,
+		EnvironmentHash: result.EnvironmentHash, MeasurementProtocol: job.MeasurementProtocol,
 		Passed: result.Passed, FileHash: result.MeasuredGGUFHash, ThermalC: result.ThermalC}
 	if result.Measurement != nil {
 		raw, err := json.Marshal(result.Measurement)

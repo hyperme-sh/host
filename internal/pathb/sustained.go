@@ -13,29 +13,67 @@ import (
 )
 
 const SustainedDecodeProtocol = "sustained-decode-v2"
+const SustainedSeriesProtocol = "sustained-decode-v3"
 const sustainedDecodeTokens = 64
+const sustainedSeriesSamples = 3
+
+func IsSustainedProtocol(protocol string) bool {
+	return protocol == SustainedDecodeProtocol || protocol == SustainedSeriesProtocol
+}
+
+type DecodeSample struct {
+	DecodeTokens    int   `json:"decode_tokens"`
+	DecodeElapsedMS int64 `json:"decode_elapsed_ms"`
+}
 
 // DecodeMeasurement keeps server decode time separate from full-window warmup.
 // The containing job binds the model and the actual runtime image.
 type DecodeMeasurement struct {
-	ImageDigest            string `json:"image_digest"`
-	DecodeTokens           int    `json:"decode_tokens"`
-	DecodeElapsedMS        int64  `json:"decode_elapsed_ms"`
-	ContextPromptTokens    int    `json:"context_prompt_tokens"`
-	ContextGeneratedTokens int    `json:"context_generated_tokens"`
-	ContextElapsedMS       int64  `json:"context_elapsed_ms"`
+	Warmup                 *DecodeSample  `json:"warmup,omitempty"`
+	Samples                []DecodeSample `json:"samples,omitempty"`
+	ImageDigest            string         `json:"image_digest"`
+	DecodeTokens           int            `json:"decode_tokens,omitempty"`
+	DecodeElapsedMS        int64          `json:"decode_elapsed_ms,omitempty"`
+	ContextPromptTokens    int            `json:"context_prompt_tokens"`
+	ContextGeneratedTokens int            `json:"context_generated_tokens"`
+	ContextElapsedMS       int64          `json:"context_elapsed_ms"`
 }
 
 // MeasureSustained first verifies the full context, then times 64 deterministic
 // generated tokens using llama.cpp decode timing, excluding HTTP and prefill.
-func (r Runner) MeasureSustained(ctx context.Context, tokens int) (*ContextFit, *DecodeMeasurement, error) {
+func (r Runner) MeasureSustained(ctx context.Context, tokens int, protocol string) (*ContextFit, *DecodeMeasurement, error) {
 	fit, err := r.CheckContextFit(ctx, tokens)
 	if err != nil {
 		return nil, nil, err
 	}
-	base, err := url.Parse(r.endpoint())
+	measurement := &DecodeMeasurement{
+		ContextPromptTokens:    fit.PromptTokens,
+		ContextGeneratedTokens: fit.GeneratedTokens,
+		ContextElapsedMS:       fit.ElapsedMS,
+	}
+	first, err := r.measureDecode(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+	if protocol == SustainedSeriesProtocol {
+		measurement.Warmup = &first
+		for range sustainedSeriesSamples {
+			sample, err := r.measureDecode(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			measurement.Samples = append(measurement.Samples, sample)
+		}
+	} else {
+		measurement.DecodeTokens, measurement.DecodeElapsedMS = first.DecodeTokens, first.DecodeElapsedMS
+	}
+	return fit, measurement, nil
+}
+
+func (r Runner) measureDecode(ctx context.Context) (DecodeSample, error) {
+	base, err := url.Parse(r.endpoint())
+	if err != nil {
+		return DecodeSample{}, err
 	}
 	base.Path = "/completion"
 	base.RawPath = ""
@@ -48,7 +86,7 @@ func (r Runner) MeasureSustained(ctx context.Context, tokens int) (*ContextFit, 
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base.String(), bytes.NewReader(body))
 	if err != nil {
-		return nil, nil, err
+		return DecodeSample{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	client := *r.client()
@@ -56,12 +94,12 @@ func (r Runner) MeasureSustained(ctx context.Context, tokens int) (*ContextFit, 
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := client.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("sustained decode transport failed")
+		return DecodeSample{}, fmt.Errorf("sustained decode transport failed")
 	}
 	defer response.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 1<<20+1))
 	if err != nil || len(raw) > 1<<20 || response.StatusCode != 200 {
-		return nil, nil, fmt.Errorf("sustained decode response unavailable")
+		return DecodeSample{}, fmt.Errorf("sustained decode response unavailable")
 	}
 	var out struct {
 		Predicted int    `json:"tokens_predicted"`
@@ -73,8 +111,7 @@ func (r Runner) MeasureSustained(ctx context.Context, tokens int) (*ContextFit, 
 		} `json:"timings"`
 	}
 	if json.Unmarshal(raw, &out) != nil || out.Predicted != sustainedDecodeTokens || out.Timings.Tokens != sustainedDecodeTokens || !out.Stop || out.StopType != "limit" || math.IsNaN(out.Timings.Milliseconds) || math.IsInf(out.Timings.Milliseconds, 0) || out.Timings.Milliseconds <= 0 || out.Timings.Milliseconds > 120000 {
-		return nil, nil, fmt.Errorf("sustained decode requires complete counts and finite decode timing")
+		return DecodeSample{}, fmt.Errorf("sustained decode requires complete counts and finite decode timing")
 	}
-	measured := &DecodeMeasurement{DecodeTokens: out.Timings.Tokens, DecodeElapsedMS: int64(math.Ceil(out.Timings.Milliseconds)), ContextPromptTokens: fit.PromptTokens, ContextGeneratedTokens: fit.GeneratedTokens, ContextElapsedMS: fit.ElapsedMS}
-	return fit, measured, nil
+	return DecodeSample{DecodeTokens: out.Timings.Tokens, DecodeElapsedMS: int64(math.Ceil(out.Timings.Milliseconds))}, nil
 }

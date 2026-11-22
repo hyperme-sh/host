@@ -33,14 +33,14 @@ func validCertificationImage(value string) bool {
 // cannot be turned into a certification sample. No service activation,
 // model download, lease creation or sell-state change happens here.
 func (a *Agent) runCertWorkload(ctx context.Context, job api.Job, observe func(context.Context)) (result pathb.Result) {
-	v2 := job.MeasurementProtocol == pathb.SustainedDecodeProtocol
-	if job.MeasurementProtocol != "" && !v2 {
+	sustained := pathb.IsSustainedProtocol(job.MeasurementProtocol)
+	if job.MeasurementProtocol != "" && !sustained {
 		return pathb.Result{Reason: "unsupported measurement protocol"}
 	}
-	if v2 && (job.SuiteID != pathb.SustainedDecodeProtocol || job.CertificationContextTokens == 0 || !certImagePin.MatchString(job.ImageDigest)) {
+	if sustained && (job.SuiteID != job.MeasurementProtocol || job.CertificationContextTokens == 0 || !certImagePin.MatchString(job.ImageDigest)) {
 		return pathb.Result{Reason: "sustained certification requires explicit suite, context and immutable runtime"}
 	}
-	if v2 {
+	if sustained {
 		job.SuiteID = pathb.SuitePackV1
 	}
 	job.SuiteID = certSuite(job.SuiteID)
@@ -83,7 +83,11 @@ func (a *Agent) runCertWorkload(ctx context.Context, job api.Job, observe func(c
 			return result
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	workloadTimeout := 5 * time.Minute
+	if job.MeasurementProtocol == pathb.SustainedSeriesProtocol {
+		workloadTimeout = 15 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, workloadTimeout)
 	defer cancel()
 	gguf := a.cfg.GGUFHostPath()
 	if cached, cacheErr := a.cacheDest(pin); cacheErr == nil && a.certModelPath == "" {
@@ -181,9 +185,9 @@ func (a *Agent) runCertWorkload(ctx context.Context, job api.Job, observe func(c
 		}
 	}
 	var fit *pathb.ContextFit
-	if v2 {
+	if sustained {
 		var measurement *pathb.DecodeMeasurement
-		fit, measurement, err = runner.MeasureSustained(ctx, contextWindow)
+		fit, measurement, err = runner.MeasureSustained(ctx, contextWindow, job.MeasurementProtocol)
 		if err != nil {
 			return fail(err.Error())
 		}
@@ -193,8 +197,11 @@ func (a *Agent) runCertWorkload(ctx context.Context, job api.Job, observe func(c
 		}
 		measurement.ImageDigest = job.ImageDigest
 		result = pathb.Result{Passed: true, Measured: true, ImageHash: snap.ImageHash, ThermalC: snap.ThermalC,
-			MeasurementProtocol: pathb.SustainedDecodeProtocol, Measurement: measurement,
-			SampleMs: int(measurement.DecodeElapsedMS), DecodeTokS: float64(measurement.DecodeTokens) * 1000 / float64(measurement.DecodeElapsedMS)}
+			MeasurementProtocol: job.MeasurementProtocol, Measurement: measurement}
+		if measurement.DecodeElapsedMS > 0 {
+			result.SampleMs = int(measurement.DecodeElapsedMS)
+			result.DecodeTokS = float64(measurement.DecodeTokens) * 1000 / float64(measurement.DecodeElapsedMS)
+		}
 	} else {
 		if contextWindow > 0 {
 			fit, err = runner.CheckContextFit(ctx, contextWindow)

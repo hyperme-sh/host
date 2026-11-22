@@ -29,14 +29,14 @@ import (
 
 // Agent is the host process.
 type Agent struct {
-	nativeHeartbeat atomic.Pointer[api.HeartbeatResponse]
+	nativeHeartbeat  atomic.Pointer[api.HeartbeatResponse]
 	nativeRetryAfter time.Time
-	shapeMu sync.Mutex
-	shapeCheckedAt time.Time
-	shape *hardware.Shape
+	shapeMu          sync.Mutex
+	shapeCheckedAt   time.Time
+	shape            *hardware.Shape
 	// Captured before an update can rename the running executable.
 	installBinary string
-	trusted runtime.Starter
+	trusted       runtime.Starter
 	// certEndpoint is a test seam; production certification always uses loopback.
 	certContextTokens int // nonzero only for an explicitly approved full-context check
 	certEndpoint      string
@@ -229,7 +229,9 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 		log = logsafe.New()
 	}
 	installBinary, err := (&Agent{cfg: cfg}).softwareBinary()
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	src := telem.Default()
 	wg := tunnel.NewRunnerMode(cfg.WGMode)
 	wg.Log = log
@@ -249,9 +251,9 @@ func New(cfg Config, log *slog.Logger) (*Agent, error) {
 	nvidia.Capture, hip.Capture, cpu.Capture = capture, capture, capture
 	return &Agent{
 		installBinary: installBinary,
-		cfg:    cfg,
-		client: machineAPIClient(cfg),
-		telem:  src,
+		cfg:           cfg,
+		client:        machineAPIClient(cfg),
+		telem:         src,
 		pathb: pathb.Runner{
 			Collector: src,
 			Endpoint:  cfg.CompletionsEndpoint(),
@@ -525,7 +527,7 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 		name, _ = os.Hostname()
 	}
 	hb, err := a.client.Heartbeat(ctx, api.HeartbeatRequest{
-		HardwareShape: a.heartbeatShape(ctx),
+		HardwareShape:   a.heartbeatShape(ctx),
 		HostName:        name,
 		DeviceID:        a.state.DeviceID,
 		ImageHash:       image,
@@ -817,10 +819,10 @@ func (a *Agent) pullAndRun(ctx context.Context) error {
 	if job == nil {
 		return nil
 	}
-	if job.SuiteID == pathb.SustainedDecodeProtocol && job.MeasurementProtocol != pathb.SustainedDecodeProtocol {
+	if pathb.IsSustainedProtocol(job.SuiteID) && job.MeasurementProtocol != job.SuiteID {
 		return fmt.Errorf("assigned sustained certification requires a compatible Plane response")
 	}
-	if job.MeasurementProtocol == pathb.SustainedDecodeProtocol {
+	if pathb.IsSustainedProtocol(job.MeasurementProtocol) {
 		if found, err := a.retrySustained(ctx, *job); found {
 			return err
 		}
@@ -863,7 +865,7 @@ func (a *Agent) pullAndRun(ctx context.Context) error {
 	if job.Kind == api.KindPathB && strings.TrimSpace(job.CatalogID) == "" {
 		a.attachEgressObservation(ctx, &res)
 	}
-	if job.MeasurementProtocol == pathb.SustainedDecodeProtocol {
+	if pathb.IsSustainedProtocol(job.MeasurementProtocol) {
 		err := a.postSustained(ctx, *job, res.Result)
 		// The saved report survives a failed upload and permits updater recovery.
 		a.pendingResult.Store(false)

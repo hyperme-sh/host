@@ -75,6 +75,7 @@ func (a *Agent) safeHealth(ctx context.Context) *api.HostHealth {
 		BuildNumber:            buildinfo.CurrentBuild(),
 		BuildChannel:           buildinfo.CurrentChannel(),
 		CertificationProtocols: []string{pathb.SustainedDecodeProtocol},
+		CertificationSeriesV3:  true,
 		HostType:               a.cfg.ReportedHostType(),
 	}
 	// Preserve the fail-closed capacity signal when a cache probe is unavailable.
