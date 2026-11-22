@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/FyberLabs/hypermesh-host/internal/pathb"
 	"net"
 	"os/exec"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/FyberLabs/hypermesh-host/internal/api"
 	"github.com/FyberLabs/hypermesh-host/internal/buildinfo"
 	"github.com/FyberLabs/hypermesh-host/internal/metrics"
+	"github.com/FyberLabs/hypermesh-host/internal/pathb"
 	"github.com/FyberLabs/hypermesh-host/internal/runtime"
 	"github.com/FyberLabs/hypermesh-host/internal/tunnel"
 )
@@ -66,41 +66,57 @@ func (a *Agent) recordHeartbeat(err error) {
 	a.hbFail[class]++
 }
 
-// safeHealth builds the heartbeat health object. Collection failures are
-// logged and omitted. This never returns an error and must not panic
-// into the heartbeat.
-func (a *Agent) safeHealth(ctx context.Context) (h *api.HostHealth) {
-	h = &api.HostHealth{
+// safeHealth keeps optional probes, including cache I/O, off the heartbeat
+// deadline. A stalled probe cannot start another worker or hide build identity.
+func (a *Agent) safeHealth(ctx context.Context) *api.HostHealth {
+	base := api.HostHealth{
 		BuildCommit:            buildinfo.Current(),
+		BuildVersion:           buildinfo.CurrentVersion(),
+		BuildNumber:            buildinfo.CurrentBuild(),
+		BuildChannel:           buildinfo.CurrentChannel(),
 		CertificationProtocols: []string{pathb.SustainedDecodeProtocol},
 		HostType:               a.cfg.ReportedHostType(),
 	}
-	defer func() {
-		if rec := recover(); rec != nil {
-			a.log.Warn("health collection failed", "err", fmt.Sprint(rec))
-		}
-	}()
-	a.fillHealth(ctx, h)
-	return h
+	// Preserve the fail-closed capacity signal when a cache probe is unavailable.
+	if a.cfg.GGUFHostPath() != "" {
+		zero := int64(0)
+		base.ModelCacheAvailableBytes = &zero
+	}
+	if ctx.Err() != nil || !a.healthProbeActive.CompareAndSwap(false, true) {
+		return &base
+	}
+	probe, cancel := context.WithTimeout(ctx, healthProbeTimeout)
+	defer cancel()
+	result := make(chan api.HostHealth, 1)
+	go func(health api.HostHealth) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				a.log.Warn("health collection failed", "err", fmt.Sprint(rec))
+			}
+			a.healthProbeActive.Store(false)
+			result <- health
+		}()
+		a.fillHealth(probe, &health)
+	}(base)
+	select {
+	case health := <-result:
+		return &health
+	case <-probe.Done():
+		return &base
+	}
 }
 
 func (a *Agent) fillHealth(ctx context.Context, h *api.HostHealth) {
 	at, ok, class, status := a.syncFacts()
 	h.LastSyncErrorClass = class
 	h.LastSyncHTTPStatus = status
-	h.BuildCommit = buildinfo.Current()
-	h.BuildVersion = buildinfo.CurrentVersion()
-	h.BuildNumber = buildinfo.CurrentBuild()
-	h.BuildChannel = buildinfo.CurrentChannel()
 	if ok {
 		h.LastSyncAt = at.UTC().Format(time.RFC3339)
 	}
-	probe, cancel := context.WithTimeout(ctx, healthProbeTimeout)
-	defer cancel()
 	if src, ok := a.tunnels.(interface {
 		Snapshot(context.Context) (tunnel.Snapshot, error)
 	}); ok && a.tunnels != nil {
-		snap, err := src.Snapshot(probe)
+		snap, err := src.Snapshot(ctx)
 		if err != nil {
 			a.log.Warn("tunnel health snapshot failed", "err", err)
 		} else {
@@ -111,7 +127,7 @@ func (a *Agent) fillHealth(ctx context.Context, h *api.HostHealth) {
 			h.WGPort = copyInt(snap.ListenPort)
 		}
 	}
-	if n, ok := a.leaseCount(probe); ok {
+	if n, ok := a.leaseCount(ctx); ok {
 		h.LeaseContainerCount = &n
 	}
 	free, size, diskOK := a.diskUsage()
@@ -126,11 +142,6 @@ func (a *Agent) fillHealth(ctx context.Context, h *api.HostHealth) {
 		a.metricDiskSize = nil
 	}
 	a.healthMu.Unlock()
-	// Updated hosts report zero admission capacity when cache policy is unreadable.
-	if a.cfg.GGUFHostPath() != "" {
-		zero := int64(0)
-		h.ModelCacheAvailableBytes = &zero
-	}
 	if used, evictable, ok := a.modelCacheUsage(); ok {
 		h.ModelCacheBytes = &used
 		h.ModelCacheEvictableBytes = &evictable
