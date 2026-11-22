@@ -112,15 +112,19 @@ func performQualification(ctx context.Context, j *qualificationJournal, d qualif
 	}
 	return nil
 }
-func qualificationSample(ctx context.Context, p certificationPlan, measurementID string) (hostregistration.QualificationSample, error) {
+func qualificationSample(ctx context.Context, p certificationPlan, measurementID string, forum bool) (hostregistration.QualificationSample, error) {
 	m := p.Run.Manifest
 	request := agent.WorkloadPreflight{PlanSHA256: measurementID, CatalogID: m.CatalogID, ImageDigest: m.ImageDigest, ModelPath: p.ModelPath, FileHash: m.FileHash, ContextTokens: m.ContextTokens, FullContext: true, SuiteID: m.SuiteID}
-	config, err := os.MkdirTemp(defaultSetupState, ".qualification-docker-")
+	config, err := os.MkdirTemp(certificationSetupState(forum), ".qualification-docker-")
 	if err != nil {
 		return hostregistration.QualificationSample{}, err
 	}
 	defer os.RemoveAll(config)
-	receipt, err := agent.RunWorkloadPreflight(ctx, request, "/var/lib/hypermesh", func(ctx context.Context, _ string, args ...string) ([]byte, error) {
+	workloadState := "/var/lib/hypermesh"
+	if forum {
+		workloadState = forumState
+	}
+	receipt, err := agent.RunWorkloadPreflight(ctx, request, workloadState, func(ctx context.Context, _ string, args ...string) ([]byte, error) {
 		return workloadDocker(ctx, config, args...)
 	})
 	if err != nil {
@@ -132,6 +136,10 @@ func qualificationSample(ctx context.Context, p certificationPlan, measurementID
 	return hostregistration.QualificationSample{MeasurementID: measurementID, CertificationEvidence: hostregistration.CertificationEvidence{HostImageHash: receipt.HostImageHash, FileHash: m.FileHash, ImageDigest: m.ImageDigest, SampleMS: receipt.SampleMS, TokensPerSecond: receipt.TokensPerSecond, ThermalC: receipt.ThermalC, ContextTokens: m.ContextTokens, PromptTokens: receipt.ContextFit.PromptTokens, GeneratedTokens: receipt.ContextFit.GeneratedTokens, ContextElapsedMS: receipt.ContextFit.ElapsedMS, CleanupComplete: true}}, nil
 }
 func RunQualifyHost(ctx context.Context, args []string, input io.Reader, out, diagnostic io.Writer) int {
+	forum := len(args) > 0 && args[0] == "--forum-test"
+	if forum {
+		args = args[1:]
+	}
 	f := flag.NewFlagSet("qualify-host", flag.ContinueOnError)
 	f.SetOutput(diagnostic)
 	id := f.String("run-id", "", "operator-authorized qualification run UUID")
@@ -143,7 +151,11 @@ func RunQualifyHost(ctx context.Context, args []string, input io.Reader, out, di
 		}
 		return 2
 	}
-	if f.NArg() != 0 || !hostregistration.UUID.MatchString(*id) {
+	if forum && (*path == "" || *tokenPath != "") {
+		fmt.Fprintln(diagnostic, "forum TEST requires --agent-plan and uses the installed Qwen model")
+		return 2
+	}
+	if f.NArg() != 0 || ((!forum || *id != "") && !hostregistration.UUID.MatchString(*id)) {
 		fmt.Fprintln(diagnostic, "require --run-id UUID from the program operator")
 		return 2
 	}
@@ -165,7 +177,7 @@ func RunQualifyHost(ctx context.Context, args []string, input io.Reader, out, di
 		}
 		*path = filepath.Join(planDir, "agent.json")
 	}
-	unlock, err := lockSetupState(defaultSetupState)
+	unlock, err := lockSetupState(certificationLockState(forum))
 	if err != nil {
 		fmt.Fprintln(diagnostic, err)
 		return 1
@@ -182,27 +194,47 @@ func RunQualifyHost(ctx context.Context, args []string, input io.Reader, out, di
 	}
 	var identity registrationJournal
 	if err == nil {
-		err = guidedRead(registrationPath(defaultSetupState, p.Agent.SHA256), &identity, true)
-	}
-	if err == nil {
-		err = validateRegistration(identity, p.Agent, identity.Issuer, identity.Dashboard, identity.Request.ClassID)
+		if forum {
+			identity, err = readForumCertificationIdentity(p.Agent)
+		} else {
+			err = guidedRead(registrationPath(defaultSetupState, p.Agent.SHA256), &identity, true)
+			if err == nil {
+				err = validateRegistration(identity, p.Agent, identity.Issuer, identity.Dashboard, identity.Request.ClassID)
+			}
+		}
 	}
 	if err == nil && identity.State != "registered-inactive" {
 		err = fmt.Errorf("qualification requires a registered inactive host")
 	}
 	if err == nil {
-		err = certPreflight(ctx, p, identity)
+		err = scopedCertificationPreflight(ctx, p, identity, forum)
 	}
 	if err != nil {
 		fmt.Fprintln(diagnostic, err)
 		return 1
 	}
-	c, err := newRegistrationClient(p.Agent.ControlPlane, p.Agent.TenantID)
+	c, err := scopedCertificationClient(p.Agent, forum)
 	if err != nil {
 		fmt.Fprintln(diagnostic, err)
 		return 1
 	}
-	journalPath := filepath.Join(defaultSetupState, "qualification-"+*id+".json")
+	if forum && *id == "" {
+		next, err := c.NextQualification(ctx, identity.Request, identity.DeviceID, identity.DeviceSecret)
+		if err != nil {
+			fmt.Fprintln(diagnostic, err)
+			return 1
+		}
+		if next.Action == "certification" {
+			fmt.Fprintln(out, "The s3r.ch TEST Qwen reference is ready for certification.")
+			return 0
+		}
+		if next.Action != "qualification" {
+			fmt.Fprintln(diagnostic, "Resolve the current s3r.ch TEST qualification before starting another run.")
+			return 1
+		}
+		*id = *next.RunID
+	}
+	journalPath := filepath.Join(certificationSetupState(forum), "qualification-"+*id+".json")
 	var j qualificationJournal
 	if _, e := os.Lstat(journalPath); e == nil {
 		err = guidedRead(journalPath, &j, true)
@@ -216,11 +248,19 @@ func RunQualifyHost(ctx context.Context, args []string, input io.Reader, out, di
 		if err == nil && (j.Run.State != "planned" || !j.Run.ExpiresAt.After(time.Now())) {
 			err = fmt.Errorf("request a new qualification run; this attempt has ended")
 		}
+		if err == nil && forum {
+			p.Run = j.Run.CertificationRun
+			err = validateForumCertificationModel(p)
+		}
 		if err == nil {
 			m := j.Run.Manifest
 			fmt.Fprintf(out, "Lab qualification: %s on %s\nModel: %s\nSHA-256: %s\nRuntime: %s\nContext: %d tokens; three independent model-load and measured generation runs.\n", m.CatalogID, p.Agent.HostName, m.SourceRef, m.FileHash, m.ImageDigest, m.ContextTokens)
 			ui := guidedUI{in: bufio.NewReader(input), out: out, ctx: ctx}
-			err = ui.confirm("Download the pinned model and run these tests? Evidence goes to operator review; services remain inactive and selling stays disabled.")
+			if forum {
+				err = ui.confirm("Measure the installed s3r.ch TEST Qwen model while the host services remain inactive?")
+			} else {
+				err = ui.confirm("Download the pinned model and run these tests? Evidence goes to operator review; services remain inactive and selling stays disabled.")
+			}
 		}
 		if err == nil {
 			j.State = "approved"
@@ -235,20 +275,31 @@ func RunQualifyHost(ctx context.Context, args []string, input io.Reader, out, di
 		fmt.Fprintln(diagnostic, err)
 		return 1
 	}
-	err = collectQualification(ctx, p, identity, c, &j, journalPath, *tokenPath, out,
-		func(ctx context.Context) error { return certPreflight(ctx, p, identity) })
+	err = collectQualification(ctx, p, identity, c, &j, journalPath, *tokenPath, out, forum,
+		func(ctx context.Context) error { return scopedCertificationPreflight(ctx, p, identity, forum) })
 	fmt.Fprintln(out, "Qualification evidence saved at", journalPath)
 	if err != nil {
 		fmt.Fprintln(diagnostic, err)
 		return 1
 	}
+	if forum {
+		fmt.Fprintln(out, "Measurements submitted to the s3r.ch TEST certification program.")
+		return 0
+	}
 	fmt.Fprintln(out, "Measurements recorded. The program operator must review and publish the baseline before normal host certification. No services were activated.")
 	return 0
 }
 
-func collectQualification(ctx context.Context, p certificationPlan, identity registrationJournal, c *hostregistration.Client, j *qualificationJournal, journalPath, tokenPath string, out io.Writer, check func(context.Context) error) error {
+func collectQualification(ctx context.Context, p certificationPlan, identity registrationJournal, c *hostregistration.Client, j *qualificationJournal, journalPath, tokenPath string, out io.Writer, forum bool, check func(context.Context) error) error {
 	p.Run = j.Run.CertificationRun
-	p.ModelPath = filepath.Join(p.Agent.Setup.Preflight.Resources.ModelDirectory, "cache", strings.TrimPrefix(p.Run.Manifest.FileHash, "sha256:")+".gguf")
+	if forum {
+		if err := validateForumCertificationModel(p); err != nil {
+			return err
+		}
+		p.ModelPath = forumCertificationModel
+	} else {
+		p.ModelPath = filepath.Join(p.Agent.Setup.Preflight.Resources.ModelDirectory, "cache", strings.TrimPrefix(p.Run.Manifest.FileHash, "sha256:")+".gguf")
+	}
 	p.SHA256 = certificationDigest(p)
 	if _, err := certificationURL(p.Run.Manifest.SourceRef); err != nil {
 		return err
@@ -267,6 +318,9 @@ func collectQualification(ctx context.Context, p certificationPlan, identity reg
 			return check(ctx)
 		},
 		Acquire: func(ctx context.Context) error {
+			if forum {
+				return verifyAcquiredModel(ctx, p.ModelPath, p.Run.Manifest.FileHash, p.Run.Manifest.SizeBytes)
+			}
 			if err := agentDirectory(filepath.Dir(p.ModelPath), true); err != nil {
 				return err
 			}
@@ -288,7 +342,7 @@ func collectQualification(ctx context.Context, p certificationPlan, identity reg
 		},
 		Sample: func(ctx context.Context, measurementID string) (hostregistration.QualificationSample, error) {
 			fmt.Fprintf(out, "Running measurement %d/3…\n", len(j.Report.Samples)+1)
-			return qualificationSample(ctx, p, measurementID)
+			return qualificationSample(ctx, p, measurementID, forum)
 		},
 		Save: func(value qualificationJournal) error { return writeGuided(journalPath, value) },
 		Report: func(ctx context.Context, report hostregistration.QualificationReport) error {
@@ -403,7 +457,7 @@ func RunPendingQualification(ctx context.Context, cfg agent.Config, state agent.
 	if err := c.ClaimQualification(ctx, identity.Request, state.DeviceID, state.DeviceSecret, *run, j.ClaimID); err != nil {
 		return err
 	}
-	return collectQualification(ctx, p, identity, c, &j, path, "", io.Discard, check)
+	return collectQualification(ctx, p, identity, c, &j, path, "", io.Discard, false, check)
 }
 
 // Reuse the assigned idle tunnel when the agent has already configured it.

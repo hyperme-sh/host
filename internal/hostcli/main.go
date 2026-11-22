@@ -234,6 +234,7 @@ Commands:
   host-status  read current installed-service and authenticated plane state; --plan CERTIFICATION_PLAN_FILE
   certification-status  read redacted historical certification/activation evidence; --plan-sha SHA256
   qualify-host      run an operator-authorized initial lab baseline; --run-id UUID
+                     Use --forum-test with --agent-plan for the installed Qwen model on J4012-1.
   plan-certification  obtain an authenticated frozen model/runtime plan; --agent-plan FILE
   certify-agent  acquire and certify while inactive; --plan FILE --approve-plan SHA256 --run
                  Use --forum-test first to certify the installed J4012 TEST model and its separate enrollment.

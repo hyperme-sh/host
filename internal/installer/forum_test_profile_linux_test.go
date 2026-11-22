@@ -112,3 +112,26 @@ func TestJ4012ForumCertificationPinsTheSeparateQwenArtifact(t *testing.T) {
 		t.Fatalf("activation accepted the forum TEST selector: %s", diagnostic.String())
 	}
 }
+
+func TestForumQualificationRequiresTheInstalledModelAndPlan(t *testing.T) {
+	for _, args := range [][]string{
+		{"--forum-test"},
+		{"--forum-test", "--agent-plan", "fixture.json", "--model-token-file", "fixture-token"},
+	} {
+		var diagnostic bytes.Buffer
+		result := RunQualifyHost(context.Background(), args, strings.NewReader(""), &bytes.Buffer{}, &diagnostic)
+		if result != 2 || !strings.Contains(diagnostic.String(), "uses the installed Qwen model") {
+			t.Fatalf("expected scoped argument refusal, got %d (%s)", result, diagnostic.String())
+		}
+	}
+	p := certificationPlan{Agent: agentInstallPlan{TenantID: forumCertificationTenant}}
+	j := qualificationJournal{Run: hostregistration.QualificationRun{
+		CertificationRun: hostregistration.CertificationRun{Manifest: hostregistration.CertificationManifest{
+			CatalogID: "llama", ClassID: "nx-volume", FullContext: true,
+		}},
+	}}
+	err := collectQualification(context.Background(), p, registrationJournal{}, nil, &j, "", "", &bytes.Buffer{}, true, nil)
+	if err == nil || !strings.Contains(err.Error(), "pinned s3r.ch TEST Qwen") {
+		t.Fatalf("qualification accepted an unrelated model: %v", err)
+	}
+}
