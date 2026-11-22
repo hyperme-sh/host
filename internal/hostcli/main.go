@@ -106,11 +106,12 @@ func Main() {
   stop()
   os.Exit(code)
  }
- if name == "register-agent" || name == "registration-status" || name == "install-halo-test" {
+ if name == "register-agent" || name == "registration-status" || name == "install-halo-test" || name == "install-forum-test" {
   ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
   run := installer.RunRegisterAgent
   if name == "registration-status" { run = installer.RunRegistrationStatus }
   if name == "install-halo-test" { run = installer.RunInstallHaloTest }
+  if name == "install-forum-test" { run = installer.RunInstallForumTest }
   code := run(ctx, os.Args[2:], os.Stdout, os.Stderr)
   stop()
   os.Exit(code)
@@ -254,6 +255,7 @@ Commands:
                --heartbeat records one HTTPS heartbeat, not a verified tunnel.
   onboarding-status  read the dated readiness snapshot; --plan-sha SHA256
   install-halo-test  install a separate paused Halo TEST profile.
+  install-forum-test install the separate paused J4012 forum TEST profile.
   register-agent  device login and browser-approved registration; leaves service inactive.
                   --plan FILE --approve-plan SHA256 --issuer HTTPS_REALM
                   --dashboard-url HTTPS_ORIGIN --class-id CLASS

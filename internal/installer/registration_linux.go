@@ -45,6 +45,9 @@ func saveRegistration(path string,j registrationJournal)error {
  return nil
 }
 func newRegistration(p agentInstallPlan,issuer,dashboard,class string,fresh Plan)(registrationJournal,error) {
+ return newRegistrationWithPause(p,issuer,dashboard,class,fresh,class==haloClass)
+}
+func newRegistrationWithPause(p agentInstallPlan,issuer,dashboard,class string,fresh Plan,pause bool)(registrationJournal,error) {
  var j registrationJournal
  // A candidate class is not certification. Until generic class admission is
  // supported by the plane, accept only a measured match for existing classes.
@@ -74,7 +77,7 @@ func newRegistration(p agentInstallPlan,issuer,dashboard,class string,fresh Plan
  report:=hostregistration.Hardware{Profile:p.Setup.Profile.ID,Architecture:normalizedSetupArch(h.Facts.Arch),
  CPU:cpu,GPU:gpu,SystemMemoryBytes:fresh.Resources.Resources.SystemBytes,ModelMemoryBytes:modelMemory}
  j=registrationJournal{Schema:1,PlanSHA256:p.SHA256,Issuer:issuer,Dashboard:dashboard,PrivateKey:private,DeviceSecret:credential,State:"prepared",
- Request:hostregistration.Request{RequestID:requestID,HostName:p.HostName,ClassID:class,PauseSelling:class==haloClass,Hardware:report,WGPublicKey:public,DeviceSecretHash:digestSetupBytes([]byte(credential)),CredentialPrefix:credential[7:15]}}
+ Request:hostregistration.Request{RequestID:requestID,HostName:p.HostName,ClassID:class,PauseSelling:pause,Hardware:report,WGPublicKey:public,DeviceSecretHash:digestSetupBytes([]byte(credential)),CredentialPrefix:credential[7:15]}}
  return j,j.Request.Validate()
 }
 func registrationClass(class string,p Plan)error {
@@ -92,9 +95,12 @@ func registrationClass(class string,p Plan)error {
  return fmt.Errorf("requested class does not have a supported measured hardware match; generic/other class admission remains pending")
 }
 func validateRegistration(j registrationJournal,p agentInstallPlan,issuer,dashboard,class string)error {
+ return validateRegistrationWithPause(j,p,issuer,dashboard,class,class==haloClass)
+}
+func validateRegistrationWithPause(j registrationJournal,p agentInstallPlan,issuer,dashboard,class string,pause bool)error {
  pub,err:=tunnel.PublicFromPrivate(j.PrivateKey)
  secret,secretErr:=base64.RawURLEncoding.DecodeString(strings.TrimPrefix(j.DeviceSecret,"hm_dev_"))
- if j.Schema!=1||j.PlanSHA256!=p.SHA256||j.Issuer!=issuer||j.Dashboard!=dashboard||j.Request.HostName!=p.HostName||j.Request.ClassID!=class||j.Request.PauseSelling!=(class==haloClass)||
+ if j.Schema!=1||j.PlanSHA256!=p.SHA256||j.Issuer!=issuer||j.Dashboard!=dashboard||j.Request.HostName!=p.HostName||j.Request.ClassID!=class||j.Request.PauseSelling!=pause||
  err!=nil||pub!=j.Request.WGPublicKey||!strings.HasPrefix(j.DeviceSecret,"hm_dev_")||secretErr!=nil||len(secret)!=24||
  "hm_dev_"+base64.RawURLEncoding.EncodeToString(secret)!=j.DeviceSecret||
  digestSetupBytes([]byte(j.DeviceSecret))!=j.Request.DeviceSecretHash||len(j.DeviceSecret)<15||j.DeviceSecret[7:15]!=j.Request.CredentialPrefix {
@@ -288,7 +294,7 @@ func restartRegistration(j registrationJournal,state hostregistration.Status,p a
  }
  if j.Owner==""{return j,fmt.Errorf("verified owner required before restarting approval")}
  old:=j;old.State=state.State
- next,err:=newRegistration(p,j.Issuer,j.Dashboard,j.Request.ClassID,fresh)
+ next,err:=newRegistrationWithPause(p,j.Issuer,j.Dashboard,j.Request.ClassID,fresh,j.Request.PauseSelling)
  if err!=nil{return j,err}
  next.Owner=j.Owner
  if err=archive(old);err!=nil{return j,err}
