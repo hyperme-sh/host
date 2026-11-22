@@ -29,14 +29,14 @@ import (
 
 // Agent is the host process.
 type Agent struct {
-	nativeHeartbeat  atomic.Pointer[api.HeartbeatResponse]
+	nativeHeartbeat atomic.Pointer[api.HeartbeatResponse]
 	nativeRetryAfter time.Time
-	shapeMu          sync.Mutex
-	shapeCheckedAt   time.Time
-	shape            *hardware.Shape
+	shapeMu sync.Mutex
+	shapeCheckedAt time.Time
+	shape *hardware.Shape
 	// Captured before an update can rename the running executable.
 	installBinary string
-	trusted       runtime.Starter
+	trusted runtime.Starter
 	// certEndpoint is a test seam; production certification always uses loopback.
 	certContextTokens int // nonzero only for an explicitly approved full-context check
 	certEndpoint      string

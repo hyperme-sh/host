@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -12,7 +13,7 @@ import (
 func TestSustainedDecodeSeparatesWarmupHTTPAndGeneration(t *testing.T) {
 	for _, scenario := range []string{"valid", "series", "partial-series", "short", "missing-timing", "zero-time", "too-long", "eos", "count-mismatch", "warmup-failed"} {
 		t.Run(scenario, func(t *testing.T) {
-			decodeCalls := 0
+			var decodeCalls atomic.Int32
 			protocol := SustainedDecodeProtocol
 			if scenario == "series" || scenario == "partial-series" {
 				protocol = SustainedSeriesProtocol
@@ -42,12 +43,12 @@ func TestSustainedDecodeSeparatesWarmupHTTPAndGeneration(t *testing.T) {
 					if req["n_predict"] != float64(64) || req["cache_prompt"] != false || req["ignore_eos"] != true || req["temperature"] != float64(0) || req["seed"] != float64(0) {
 						t.Error("non-deterministic decode request")
 					}
-					decodeCalls++
-					if scenario == "partial-series" && decodeCalls == 3 {
+					calls := decodeCalls.Add(1)
+					if scenario == "partial-series" && calls == 3 {
 						w.WriteHeader(503)
 						return
 					}
-					timings := map[string]any{"predicted_n": 64, "predicted_ms": 1000.25 + float64(decodeCalls-1)*1000}
+					timings := map[string]any{"predicted_n": 64, "predicted_ms": 1000.25 + float64(calls-1)*1000}
 					response := map[string]any{"tokens_predicted": 64, "stop": true, "stop_type": "limit", "timings": timings}
 					switch scenario {
 					case "short":
@@ -85,7 +86,7 @@ func TestSustainedDecodeSeparatesWarmupHTTPAndGeneration(t *testing.T) {
 				t.Fatal(err)
 			}
 			if scenario == "series" {
-				if !fit.ValidFor(512) || decodeCalls != 4 || measurement.Warmup == nil ||
+				if !fit.ValidFor(512) || decodeCalls.Load() != 4 || measurement.Warmup == nil ||
 					measurement.Warmup.DecodeElapsedMS != 1001 || len(measurement.Samples) != 3 ||
 					measurement.DecodeTokens != 0 || measurement.DecodeElapsedMS != 0 {
 					t.Fatalf("wrong series %+v", measurement)
@@ -97,7 +98,7 @@ func TestSustainedDecodeSeparatesWarmupHTTPAndGeneration(t *testing.T) {
 				}
 				return
 			}
-			if decodeCalls != 1 || !fit.ValidFor(512) || measurement.DecodeTokens != 64 || measurement.DecodeElapsedMS != 1001 || measurement.ContextElapsedMS != fit.ElapsedMS {
+			if decodeCalls.Load() != 1 || !fit.ValidFor(512) || measurement.DecodeTokens != 64 || measurement.DecodeElapsedMS != 1001 || measurement.ContextElapsedMS != fit.ElapsedMS {
 				t.Fatalf("wrong measurement %+v", measurement)
 			}
 		})
