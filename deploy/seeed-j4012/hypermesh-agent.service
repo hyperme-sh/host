@@ -3,6 +3,7 @@ Description=Hypermesh on this box
 Documentation=https://github.com/FyberLabs/hypermesh-host
 After=network-online.target docker.service hypermesh-wg.service
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -21,7 +22,7 @@ EnvironmentFile=-/etc/hypermesh/agent.env
 ExecStartPre=/usr/local/lib/hypermesh/update-rollback
 ExecStart=/usr/local/bin/hypermesh-agent
 Restart=on-failure
-RestartSec=5
+RestartSec=15
 # Super J4012 overlay. Same unit as deploy/agx.
 # Default cgroup kill. Do not set KillMode=process or KillMode=mixed.
 # Userspace wireguard-go, when used, belongs to hypermesh-wg.service.

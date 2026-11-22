@@ -39,6 +39,9 @@ func TestAgentInstallModeAndTrustPayloads(t *testing.T) {
 			case "/etc/systemd/system/hypermesh-wg.service":foundWG=true
 			case "/etc/systemd/system/hypermesh-agent.service":
 				unit:=string(f.Data)
+				if !strings.Contains(unit, "StartLimitIntervalSec=0") || !strings.Contains(unit, "Restart=on-failure\nRestartSec=15") {
+					t.Fatal("agent startup retries must remain available and paced")
+				}
 				if strings.Contains(unit,"hypermesh-wg.service")!=(mode=="userspace"){t.Fatal("wrong tunnel dependency")}
 				if !strings.Contains(unit,"ConditionPathExists=/var/lib/hypermesh/activation-approved") ||
 					!strings.Contains(unit,"ExecStartPre=/usr/local/lib/hypermesh/update-rollback") {t.Fatal("activation or rollback gate missing")}
