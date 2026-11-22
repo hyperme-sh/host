@@ -175,7 +175,8 @@ type Agent struct {
 
 	// pendingResult is set while a pulled job has not been acked.
 	// Busy reads it. The job loop is the only writer.
-	pendingResult atomic.Bool
+	healthProbeActive atomic.Bool
+	pendingResult     atomic.Bool
 	// lastUpdateCheck throttles the update channel. The job loop owns it.
 	lastUpdateCheck time.Time
 	nextUpdateRetry time.Time

@@ -25,6 +25,51 @@ import (
 	"github.com/FyberLabs/hypermesh-host/internal/tunnel"
 )
 
+func TestHealthProbeDoesNotBlockLaterHeartbeats(t *testing.T) {
+	dir := t.TempDir()
+	a := newTestAgent(t, "http://127.0.0.1", dir, filepath.Join(dir, "uptime"), "", "")
+	started := make(chan struct{})
+	unblock := make(chan struct{})
+	t.Cleanup(func() {
+		close(unblock)
+		deadline := time.Now().Add(time.Second)
+		for a.healthProbeActive.Load() && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if a.healthProbeActive.Load() {
+			t.Error("health worker did not finish")
+		}
+	})
+	a.countLeases = func(context.Context) (int, bool) {
+		close(started)
+		<-unblock
+		return 2, true
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	collected := make(chan *api.HostHealth, 1)
+	go func() { collected <- a.safeHealth(ctx) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("health probe did not start")
+	}
+	cancel()
+	select {
+	case health := <-collected:
+		if health.BuildCommit != buildinfo.Current() || len(health.CertificationProtocols) != 1 ||
+			health.LeaseContainerCount != nil || health.ModelCacheAvailableBytes == nil ||
+			*health.ModelCacheAvailableBytes != 0 {
+			t.Fatalf("unexpected fallback health: %+v", health)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("optional probe blocked the heartbeat")
+	}
+	if next := a.safeHealth(context.Background()); next.LeaseContainerCount != nil {
+		t.Fatalf("unexpected result while the previous probe is still blocked: %+v", next)
+	}
+}
+
 func TestHeartbeatHealthShape(t *testing.T) {
 	prev := buildinfo.Commit
 	t.Cleanup(func() { buildinfo.Commit = prev })
