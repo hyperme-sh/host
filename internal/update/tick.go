@@ -359,7 +359,7 @@ func restart(ctx context.Context, name string, args ...string) error {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
 			status, ok := exit.Sys().(syscall.WaitStatus)
-			if ctx.Err() != nil || (ok && status.Signaled() && status.Signal() == syscall.SIGTERM) {
+			if ok && status.Signaled() && (status.Signal() == syscall.SIGTERM || ctx.Err() != nil) {
 				return errRestartInterrupted
 			}
 		}
