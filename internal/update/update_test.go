@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -456,6 +457,40 @@ func TestTickVerificationAndBusy(t *testing.T) {
 		}
 		if marker.Deadline.Sub(now) != 2*time.Minute {
 			t.Fatal("download consumed rollback window")
+		}
+	})
+	t.Run("shutdown during restart leaves candidate for heartbeat confirmation", func(t *testing.T) {
+		cfg := base
+		dir := t.TempDir()
+		cfg.BinaryPath = filepath.Join(dir, "agent")
+		cfg.MarkerPath = filepath.Join(dir, MarkerName)
+		if err := os.WriteFile(cfg.BinaryPath, []byte("old"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		_, err := Tick(ctx, cfg, Hooks{
+			Source: src, Verify: func(_, _, _ []byte) error { return nil },
+			Install: InstallFile,
+			Restart: func(context.Context) error {
+				cancel()
+				return errors.New("systemctl interrupted during service shutdown")
+			},
+		})
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected shutdown cancellation, got %v", err)
+		}
+		marker, err := ReadMarker(cfg.MarkerPath)
+		if err != nil || marker == nil {
+			t.Fatalf("lost pending update marker: %v", err)
+		}
+		got, err := os.ReadFile(cfg.BinaryPath)
+		if err != nil || string(got) == "old" || len(got) == 0 {
+			t.Fatalf("candidate did not survive shutdown: %v", err)
+		}
+		backup, err := os.ReadFile(marker.Backup)
+		if err != nil || string(backup) != "old" {
+			t.Fatalf("lost rollback binary: %v", err)
 		}
 	})
 	for _, failure := range []string{"install", "marker", "restart", "rollback"} {
