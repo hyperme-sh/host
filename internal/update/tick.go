@@ -276,6 +276,12 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 		return Plan{}, restore(err, true)
 	}
 	if err := restart(ctx); err != nil {
+		// systemd can stop the old agent and its systemctl child before
+		// systemctl acknowledges the queued restart. On shutdown, keep the
+		// candidate and marker so the next process can confirm or roll back.
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return Plan{}, ctx.Err()
+		}
 		return Plan{}, restore(err, true)
 	}
 	return plan, nil
