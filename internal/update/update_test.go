@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -382,6 +383,25 @@ func TestTickVerificationAndBusy(t *testing.T) {
 		}
 		if plan.Action != ActionDefer || installed || restarted {
 			t.Fatalf("plan %+v installed %v restarted %v", plan, installed, restarted)
+		}
+	})
+
+	t.Run("interrupted restart preserves pending update", func(t *testing.T) {
+		cfg := base
+		cfg.MarkerPath = filepath.Join(t.TempDir(), "update-pending")
+		rolled := false
+		_, err := Tick(context.Background(), cfg, Hooks{
+			Source: src,
+			Verify: func(_, _, _ []byte) error { return nil },
+			Install: func(dest string, payload []byte, previous string) (string, error) {
+				return dest + ".backup", nil
+			},
+			Restart:  func(context.Context) error { return errRestartInterrupted },
+			Rollback: func(string, string) error { rolled = true; return nil },
+		})
+		marker, markerErr := ReadMarker(cfg.MarkerPath)
+		if !errors.Is(err, errRestartInterrupted) || markerErr != nil || marker == nil || rolled {
+			t.Fatalf("restart error=%v marker=%v marker error=%v rolled back=%v", err, marker, markerErr, rolled)
 		}
 	})
 
@@ -2794,5 +2814,28 @@ func TestRestartAgentQueuesOnlyItsOwnUnit(t *testing.T) {
 		if restartAllowed("systemctl", args) {
 			t.Fatalf("unsafe restart accepted: %v", args)
 		}
+	}
+}
+
+func TestRestartAgentDistinguishesInterruptionFromRefusal(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	for _, tc := range []struct {
+		name        string
+		body        string
+		interrupted bool
+	}{
+		{"signal", "kill -TERM $$", true},
+		{"refusal", "exit 1", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte("#!/bin/sh\n"+tc.body+"\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			err := RestartAgent(context.Background())
+			if err == nil || errors.Is(err, errRestartInterrupted) != tc.interrupted {
+				t.Fatalf("restart error = %v", err)
+			}
+		})
 	}
 }

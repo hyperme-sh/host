@@ -164,6 +164,11 @@ func Revert(ctx context.Context, cfg Config, target string, h Hooks) (Plan, erro
 		return Plan{}, restore(err)
 	}
 	if err := restart(ctx); err != nil {
+		// systemd may stop this cgroup before systemctl returns. Keep the
+		// candidate and marker so the next process can confirm or roll back.
+		if errors.Is(err, errRestartInterrupted) {
+			return Plan{}, err
+		}
 		return Plan{}, restore(err)
 	}
 	return Plan{Action: ActionInstall, Version: man.Version, Commit: man.Commit}, nil

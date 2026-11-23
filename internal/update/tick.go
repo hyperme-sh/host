@@ -14,10 +14,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
 const maxAsset = 64 << 20
+
+var errRestartInterrupted = errors.New("hypermesh update: restart handoff interrupted")
 
 // Config is one update check. There is no GitHub token on the host.
 type Config struct {
@@ -276,6 +279,11 @@ func tick(ctx context.Context, cfg Config, h Hooks) (Plan, error) {
 		return Plan{}, restore(err, true)
 	}
 	if err := restart(ctx); err != nil {
+		// systemd may stop this cgroup before systemctl returns. Keep the
+		// candidate and marker so the next process can confirm or roll back.
+		if errors.Is(err, errRestartInterrupted) {
+			return Plan{}, err
+		}
 		return Plan{}, restore(err, true)
 	}
 	return plan, nil
@@ -344,7 +352,17 @@ func restart(ctx context.Context, name string, args ...string) error {
 		return fmt.Errorf("hypermesh update: refusing to run %s", name)
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("hypermesh update: systemctl restart %s", AgentUnit)
+	}
+	if err := cmd.Wait(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			status, ok := exit.Sys().(syscall.WaitStatus)
+			if ctx.Err() != nil || (ok && status.Signaled() && status.Signal() == syscall.SIGTERM) {
+				return errRestartInterrupted
+			}
+		}
 		return fmt.Errorf("hypermesh update: systemctl restart %s", AgentUnit)
 	}
 	return nil
