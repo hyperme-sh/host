@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -15,7 +16,7 @@ import (
 const (
 	sellFile = "sell.json"
 	// sellOwnerFile keeps the posture to restore after a maintenance pause:
-	// the owner's pause, or selling when there was none.
+	// the owner's pause or the host's non-paused posture.
 	sellOwnerFile = "sell-owner.json"
 )
 
@@ -98,8 +99,8 @@ func (a *Agent) loadKeptSell() (SellPosture, bool) {
 		return SellPosture{}, false
 	}
 	switch p.SellState {
-	case api.SellSelling:
-		return SellPosture{SellState: api.SellSelling}, true
+	case api.SellSelling, api.SellNA:
+		return SellPosture{SellState: p.SellState}, true
 	case api.SellPaused:
 		p.Source = SellSourceOwner
 		return p, true
@@ -171,7 +172,7 @@ func (a *Agent) saveSell(p SellPosture) error {
 }
 
 // effectiveSell returns the real sell posture after until expiry.
-// After the actuator exists the default is selling, never n/a.
+// Fresh enrollment explicitly records the unadvertised posture.
 func (a *Agent) effectiveSell() SellPosture {
 	a.sellMu.Lock()
 	defer a.sellMu.Unlock()
@@ -179,7 +180,9 @@ func (a *Agent) effectiveSell() SellPosture {
 }
 
 func (a *Agent) effectiveSellLocked() SellPosture {
- if a.maintenanceHeld(){return SellPosture{SellState:api.SellPaused}}
+	if a.maintenanceHeld() {
+		return SellPosture{SellState: api.SellPaused}
+	}
 	raw, _ := os.ReadFile(a.sellPath())
 	p := a.loadSell()
 	if p.installerShaped() {
@@ -188,7 +191,7 @@ func (a *Agent) effectiveSellLocked() SellPosture {
 		// A kept owner pause only applies while sell.json is the maintenance pause.
 		_ = os.Remove(a.sellOwnerPath())
 	}
-	if p.SellState == "" || p.SellState == api.SellNA {
+	if p.SellState == "" {
 		p = SellPosture{SellState: api.SellSelling}
 		if err := a.saveSell(p); err != nil {
 			a.sellLog().Warn("sell posture not saved", "err", err)
@@ -234,7 +237,33 @@ func formatUntil(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-func (a *Agent) sellPause(job api.Job) jobOutcome {
+func (a *Agent) sellPause(ctx context.Context, job api.Job) jobOutcome {
+	out := a.persistSellPause(job)
+	if out.Passed && out.SellState == api.SellPaused {
+		if err := a.stopPausedLease(ctx); err != nil {
+			a.sellLog().Warn("pause could not stop lease runtime", "err", err)
+			out.Passed = false
+			out.Reason = "runtime stop failed"
+		}
+	}
+	return out
+}
+
+func (a *Agent) stopPausedLease(ctx context.Context) error {
+	a.stopLeaseForwarder()
+	h := a.localLease()
+	if h == nil {
+		return nil
+	}
+	if err := a.stopHandle(ctx, h); err != nil {
+		return err
+	}
+	a.clearPendingForLease(api.Job{LeaseID: h.LeaseID}, h)
+	a.dropCurrentLease()
+	return nil
+}
+
+func (a *Agent) persistSellPause(job api.Job) jobOutcome {
 	a.sellMu.Lock()
 	defer a.sellMu.Unlock()
 	current := a.effectiveSellLocked()

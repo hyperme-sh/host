@@ -183,6 +183,9 @@ func (a *Agent) ensureLeaseForwarder(ctx context.Context) {
 	dial := a.bridgeAddr(ip)
 	a.fwdMu.Lock()
 	defer a.fwdMu.Unlock()
+	if a.effectiveSell().SellState == api.SellPaused {
+		return
+	}
 	cur := a.currentLease()
 	if cur == nil || !cur.Serving() || strings.TrimSpace(cur.LeaseID) != strings.TrimSpace(h.LeaseID) {
 		return

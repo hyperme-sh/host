@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -97,8 +98,8 @@ func TestSellPauseAppliesAndHeartbeatReports(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(hbBodies) == 0 || hbBodies[0].SellState != api.SellSelling {
-		t.Fatalf("first heartbeat must report selling, got %+v", hbBodies)
+	if len(hbBodies) == 0 || hbBodies[0].SellState != api.SellNA {
+		t.Fatalf("first heartbeat after enrollment must report unadvertised, got %+v", hbBodies)
 	}
 	if !result.Passed || result.SellState != api.SellPaused {
 		t.Fatalf("sell_pause result %+v", result)
@@ -153,7 +154,7 @@ func TestSellPauseRacesHeartbeat(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			out := a.sellPause(api.Job{
+			out := a.sellPause(context.Background(), api.Job{
 				Kind:     api.KindSellPause,
 				DeviceID: testDevice,
 				Until:    "2026-12-01T00:00:00Z",
@@ -415,15 +416,15 @@ func TestLabSoakUnchangedAndNotUsedAsSell(t *testing.T) {
 			t.Fatalf("lab soak result must not include %s: %v", extra, posted)
 		}
 	}
-	if hb.SellState != api.SellSelling {
+	if hb.SellState != api.SellNA {
 		t.Fatalf("lab soak must not invent paused sell_state, heartbeat %+v", hb)
 	}
-	if a.effectiveSell().SellState != api.SellSelling {
+	if a.effectiveSell().SellState != api.SellNA {
 		t.Fatalf("lab soak must not change sell posture: %+v", a.effectiveSell())
 	}
 }
 
-func TestSellPauseDoesNotStopExistingLease(t *testing.T) {
+func TestSellPauseCanRetryFailedRuntimeStop(t *testing.T) {
 	dir := t.TempDir()
 	uptime := filepath.Join(dir, "uptime")
 	_ = os.WriteFile(uptime, []byte("1 1\n"), 0o644)
@@ -433,20 +434,22 @@ func TestSellPauseDoesNotStopExistingLease(t *testing.T) {
 	a.lease = &runtime.Handle{Name: "hypermesh-lease-1", LeaseID: "lease-1", ContainerID: "cid"}
 	a.runtime = &runtime.NVIDIA{Run: func(context.Context, string, ...string) ([]byte, error) {
 		dockerCalls++
+		if dockerCalls == 1 {
+			return nil, errors.New("runtime unavailable")
+		}
 		return []byte("ok\n"), nil
 	}}
-	got := a.runJob(context.Background(), api.Job{
-		JobID:    "j-pause",
-		Kind:     api.KindSellPause,
-		DeviceID: testDevice,
-	})
-	if !got.Passed || got.SellState != api.SellPaused {
-		t.Fatalf("%+v", got)
+	job := api.Job{JobID: "j-pause", Kind: api.KindSellPause, DeviceID: testDevice}
+	if got := a.runJob(context.Background(), job); got.Passed || got.Reason != "runtime stop failed" {
+		t.Fatalf("pause acknowledged a failed runtime stop: %+v", got)
 	}
-	if dockerCalls != 0 {
-		t.Fatalf("sell_pause must not docker stop, calls=%d", dockerCalls)
+	if a.effectiveSell().SellState != api.SellPaused || a.localLease() == nil {
+		t.Fatal("failed stop did not keep the pause and the lease handle for retry")
 	}
-	if a.lease == nil || a.lease.LeaseID != "lease-1" {
-		t.Fatalf("existing lease must stay: %+v", a.lease)
+	if got := a.runJob(context.Background(), job); !got.Passed || got.SellState != api.SellPaused {
+		t.Fatalf("pause retry failed: %+v", got)
+	}
+	if a.localLease() != nil || dockerCalls != 3 {
+		t.Fatalf("pause retry did not stop and remove the runtime, calls=%d", dockerCalls)
 	}
 }

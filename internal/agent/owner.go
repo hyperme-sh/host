@@ -331,11 +331,13 @@ func (a *Agent) handleOwnerSellPause(w http.ResponseWriter, r *http.Request) {
 	if deviceID == "" {
 		deviceID = strings.TrimSpace(a.state.DeviceID)
 	}
-	out := a.sellPause(api.Job{
+	a.maintenanceMu.Lock()
+	out := a.sellPause(r.Context(), api.Job{
 		Kind:     api.KindSellPause,
 		DeviceID: deviceID,
 		Until:    req.Until,
 	})
+	a.maintenanceMu.Unlock()
 	if out.Passed && out.SellState == api.SellNA {
 		out.Passed = false
 		out.Reason = "invalid sell_state"
@@ -378,7 +380,9 @@ func (a *Agent) handleOwnerSellResume(w http.ResponseWriter, r *http.Request) {
 	if deviceID == "" {
 		deviceID = strings.TrimSpace(a.state.DeviceID)
 	}
+	a.maintenanceMu.Lock()
 	out := a.sellResume(deviceID)
+	a.maintenanceMu.Unlock()
 	args := map[string]any{}
 	if id := strings.TrimSpace(req.DeviceID); id != "" {
 		args["device_id"] = id

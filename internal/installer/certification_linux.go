@@ -435,6 +435,7 @@ func activationKeepsSell(raw []byte,now time.Time)(bool,error){
  if decodeSetupJSON(raw,&posture)!=nil{return false,fmt.Errorf("existing sell posture conflicts; inspect locally")}
  switch posture.SellState{
  case "selling","":return false,nil
+ case "n/a":return true,nil
  case "paused":
   if posture.Until==""{return true,nil}
   until,err:=time.Parse(time.RFC3339Nano,posture.Until)
