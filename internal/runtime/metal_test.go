@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -35,6 +36,9 @@ func TestMetalStartMock(t *testing.T) {
 		Bin: "llama-server",
 		Run: func(_ context.Context, name string, args ...string) ([]byte, error) {
 			seen = append(seen, append([]string{name}, args...))
+			if name == "/bin/ps" {
+				return []byte("/usr/local/bin/llama-server\n"), nil
+			}
 			return []byte("42\n"), nil
 		},
 	}
@@ -51,7 +55,7 @@ func TestMetalStartMock(t *testing.T) {
 	if err := m.Stop(context.Background(), got); err != nil {
 		t.Fatal(err)
 	}
-	if len(seen) != 2 || seen[1][0] != "kill" {
+	if len(seen) != 3 || seen[2][0] != "/bin/kill" || seen[2][1] != "-KILL" {
 		t.Fatalf("stop %v", seen)
 	}
 }
@@ -79,5 +83,27 @@ func TestMetalDefaultImageStubsLlamaCppCPU(t *testing.T) {
 	path, reason = ResolveBackend("llama-cpp-metal")
 	if path != StubFail || reason != "This image does not run llama-cpp-metal." {
 		t.Fatalf("llama-cpp-metal is not in the enum: path=%v reason=%q", path, reason)
+	}
+}
+
+func TestMetalStopToleratesStaleProcess(t *testing.T) {
+	for _, tc := range []struct {
+		name, command string
+		err           error
+	}{
+		{name: "already exited", err: syscall.ESRCH},
+		{name: "reused process ID", command: "/usr/bin/unrelated"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &Metal{Run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
+				if name != "/bin/ps" {
+					t.Fatalf("unexpected signal for stale process: %s", name)
+				}
+				return []byte(tc.command), tc.err
+			}}
+			if err := m.Stop(context.Background(), &Handle{ContainerID: "42"}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
