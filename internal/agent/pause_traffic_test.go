@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
+	"net/http"
 	"testing"
 	"time"
 
@@ -15,6 +17,12 @@ func TestPauseCutsOffIssuedLeaseTraffic(t *testing.T) {
 	for _, name := range []string{"ordinary", "self-use"} {
 		t.Run(name, func(t *testing.T) {
 			a := newOwnerTestAgent(t)
+			if name == "self-use" {
+				if err := a.saveSell(SellPosture{SellState: api.SellNA}); err != nil {
+					t.Fatal(err)
+				}
+				startTestOwner(t, a)
+			}
 			backend, err := net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
 				t.Fatal(err)
@@ -57,9 +65,21 @@ func TestPauseCutsOffIssuedLeaseTraffic(t *testing.T) {
 				t.Fatalf("pre-pause traffic failed: %q, %v", reply, err)
 			}
 
-			out := a.runJob(context.Background(), api.Job{Kind: api.KindSellPause, DeviceID: testDevice})
-			if !out.Passed || out.SellState != api.SellPaused {
-				t.Fatalf("pause failed: %+v", out)
+			if name == "self-use" {
+				resp := ownerDoAuth(t, a, http.MethodPost, "/v0/sell_pause", ownerSellPauseRequest{})
+				defer resp.Body.Close()
+				var out ownerSellPauseResponse
+				if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+					t.Fatal(err)
+				}
+				if resp.StatusCode != http.StatusOK || !out.Passed || out.SellState != api.SellPaused {
+					t.Fatalf("owner pause failed: HTTP %d, %+v", resp.StatusCode, out)
+				}
+			} else {
+				out := a.runJob(context.Background(), api.Job{Kind: api.KindSellPause, DeviceID: testDevice})
+				if !out.Passed || out.SellState != api.SellPaused {
+					t.Fatalf("Plane pause failed: %+v", out)
+				}
 			}
 			if _, err := conn.Read(reply); err != io.EOF {
 				t.Fatalf("pause did not close the in-flight connection: %v", err)
