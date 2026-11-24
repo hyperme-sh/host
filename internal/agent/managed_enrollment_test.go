@@ -31,8 +31,8 @@ func TestManagedEnrollmentRetryUsesSameVerifier(t *testing.T) {
 	var calls []api.ManagedEnrollRequest
 	a := &Agent{cfg: cfg, client: client}
 	client.HTTP.Transport = enrollmentRoundTripper(func(req *http.Request) (*http.Response, error) {
-		if sell := a.effectiveSell(); sell.SellState != api.SellPaused || sell.Until != "" {
-			t.Fatalf("managed enrollment contacted Plane without an indefinite pause: %+v", sell)
+		if sell := a.effectiveSell(); sell.SellState != api.SellNA || sell.Until != "" {
+			t.Fatalf("managed enrollment contacted Plane without unadvertised posture: %+v", sell)
 		}
 		if req.URL.Path != api.PathEnroll+"/"+cfg.ManagedDeviceID {
 			t.Fatalf("unexpected scoped path: %s", req.URL.Path)

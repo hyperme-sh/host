@@ -25,6 +25,7 @@ func TestActivationSellGuard(t *testing.T) {
 		bad  bool
 	}{
 		{raw: `{"sell_state":"selling"}`},
+		{raw: `{"sell_state":"n/a"}`, keep: true},
 		{raw: `{"sell_state":"paused"}`},
 		{raw: "{\n  \"sell_state\": \"paused\"\n}\n", keep: true},
 		{raw: `{"sell_state":"paused","source":"owner"}`, keep: true},

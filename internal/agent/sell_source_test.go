@@ -60,7 +60,7 @@ func TestCertifiedActivationBecomesSellable(t *testing.T) {
 
 func TestActivationReleaseKeepsOwnerPause(t *testing.T) {
 	a := newOwnerTestAgent(t)
-	out := a.sellPause(api.Job{Kind: api.KindSellPause, DeviceID: testDevice})
+	out := a.sellPause(context.Background(), api.Job{Kind: api.KindSellPause, DeviceID: testDevice})
 	if !out.Passed || out.SellState != api.SellPaused {
 		t.Fatalf("pause %+v", out)
 	}
@@ -73,7 +73,7 @@ func TestActivationReleaseKeepsOwnerPause(t *testing.T) {
 func TestOwnerPauseOverActivationGuardIsOwnerPause(t *testing.T) {
 	a := newOwnerTestAgent(t)
 	writeRawSell(t, a, `{"sell_state":"paused","source":"activation"}`)
-	out := a.sellPause(api.Job{Kind: api.KindSellPause, DeviceID: testDevice})
+	out := a.sellPause(context.Background(), api.Job{Kind: api.KindSellPause, DeviceID: testDevice})
 	if !out.Passed || storedSell(t, a).Source != SellSourceOwner {
 		t.Fatalf("owner pause not recorded over guard: %+v %+v", out, storedSell(t, a))
 	}
@@ -177,7 +177,7 @@ func TestEndedSellPauseJobResumes(t *testing.T) {
 	a := newOwnerTestAgent(t)
 	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 	a.now = func() time.Time { return now }
-	if out := a.sellPause(api.Job{Kind: api.KindSellPause, DeviceID: testDevice}); !out.Passed {
+	if out := a.sellPause(context.Background(), api.Job{Kind: api.KindSellPause, DeviceID: testDevice}); !out.Passed {
 		t.Fatalf("pause %+v", out)
 	}
 	// The plane resumes with a pause whose end is not after the host clock.
@@ -246,7 +246,7 @@ func TestMaintenanceRestoresSellingOrOwnerPause(t *testing.T) {
 	t.Run("owner pause before maintenance survives", func(t *testing.T) {
 		a := newOwnerTestAgent(t)
 		a.now = func() time.Time { return time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC) }
-		if out := a.sellPause(api.Job{Kind: api.KindSellPause, DeviceID: testDevice, Until: "2026-10-09T00:00:00Z"}); !out.Passed {
+		if out := a.sellPause(context.Background(), api.Job{Kind: api.KindSellPause, DeviceID: testDevice, Until: "2026-10-09T00:00:00Z"}); !out.Passed {
 			t.Fatalf("pause %+v", out)
 		}
 		if err := a.enterMaintenance(context.Background(), sha); err != nil {
@@ -266,7 +266,7 @@ func TestMaintenanceRestoresSellingOrOwnerPause(t *testing.T) {
 		if err := a.enterMaintenance(context.Background(), sha); err != nil {
 			t.Fatal(err)
 		}
-		if out := a.sellPause(api.Job{Kind: api.KindSellPause, DeviceID: testDevice}); !out.Passed || out.SellState != api.SellPaused {
+		if out := a.sellPause(context.Background(), api.Job{Kind: api.KindSellPause, DeviceID: testDevice}); !out.Passed || out.SellState != api.SellPaused {
 			t.Fatalf("pause %+v", out)
 		}
 		if storedSell(t, a).Source != "" {

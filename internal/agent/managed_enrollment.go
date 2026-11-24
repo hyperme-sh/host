@@ -119,7 +119,7 @@ func (a *Agent) managedCredential(keyDir string) (string, error) {
 func (a *Agent) enrollManaged(ctx context.Context, keyDir, publicKey string) (api.EnrollResponse, error) {
 	// This path runs only for fresh enrollment or its retry. Existing
 	// identities return before reaching it, preserving their owner posture.
-	if err := writeJSON0600(a.sellPath(), SellPosture{SellState: api.SellPaused, Source: SellSourceOwner}); err != nil {
+	if err := writeJSON0600(a.sellPath(), SellPosture{SellState: api.SellNA}); err != nil {
 		return api.EnrollResponse{}, err
 	}
 	secret, err := a.managedCredential(keyDir)

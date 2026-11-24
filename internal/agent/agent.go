@@ -284,6 +284,11 @@ func (a *Agent) Run(ctx context.Context) error {
 		return err
 	}
 	a.setLease(a.loadLease())
+	if a.effectiveSell().SellState == api.SellPaused {
+		if err := a.stopPausedLease(ctx); err != nil {
+			return fmt.Errorf("stop paused lease on startup: %w", err)
+		}
+	}
 	if err := a.startOwner(ctx); err != nil {
 		return err
 	}
@@ -462,6 +467,9 @@ func (a *Agent) ensureEnrolled(ctx context.Context) error {
 	if a.cfg.ManagedDeviceID != "" {
 		resp, err = a.enrollManaged(ctx, keyDir, publicKey)
 	} else {
+		if err := a.saveSell(SellPosture{SellState: api.SellNA}); err != nil {
+			return fmt.Errorf("record initial sell posture: %w", err)
+		}
 		resp, err = a.client.Enroll(ctx, api.EnrollRequest{
 			HostName:     name,
 			WGPublicKey:  publicKey,
@@ -787,7 +795,7 @@ func (a *Agent) refreshCompletions() {
 
 func (a *Agent) pullAndRun(ctx context.Context) error {
 	posture := a.effectiveSell()
-	if a.cfg.RunPendingQualification != nil && posture.SellState == "paused" &&
+	if a.cfg.RunPendingQualification != nil && (posture.SellState == api.SellPaused || posture.SellState == api.SellNA) &&
 		a.currentLease() == nil && !a.pendingResult.Load() {
 		a.maintenanceMu.Lock()
 		if !a.maintenanceHeld() {
@@ -801,7 +809,7 @@ func (a *Agent) pullAndRun(ctx context.Context) error {
 		hb.DeviceID == a.state.DeviceID && hb.NativeCertificationDue &&
 		strings.HasPrefix(hb.HardwareShapeSignature, "sha256:") && len(hb.HardwareShapeSignature) == 71 &&
 		time.Since(hb.AcceptedAt) >= 0 && time.Since(hb.AcceptedAt) <= 2*time.Minute &&
-		posture.SellState == "paused" && a.currentLease() == nil && !a.pendingResult.Load() {
+		(posture.SellState == api.SellPaused || posture.SellState == api.SellNA) && a.currentLease() == nil && !a.pendingResult.Load() {
 		a.maintenanceMu.Lock()
 		if !a.maintenanceHeld() && time.Now().After(a.nativeRetryAfter) {
 			if err := a.cfg.RunAutomaticNative(ctx, a.cfg, a.state, hb.HardwareShapeSignature); err != nil {
@@ -1043,7 +1051,7 @@ func (a *Agent) runJob(ctx context.Context, job api.Job) jobOutcome {
 	case api.KindLeaseExpiry:
 		return jobOutcome{Result: a.leaseRelease(ctx, job, "lease_expiry")}
 	case api.KindSellPause:
-		return a.sellPause(job)
+		return a.sellPause(ctx, job)
 	case "":
 		return jobOutcome{Result: pathb.Result{Passed: false, Reason: "empty job kind"}}
 	default:

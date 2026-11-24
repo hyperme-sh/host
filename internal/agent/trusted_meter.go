@@ -143,6 +143,9 @@ func (a *Agent) ensureTrustedForwarder(h *runtime.Handle) error {
 	}
 	a.fwdMu.Lock()
 	defer a.fwdMu.Unlock()
+	if a.effectiveSell().SellState == api.SellPaused {
+		return runtime.ErrTrustedRuntime
+	}
 	current := a.currentLease()
 	if current == nil || !current.Serving() || current.LeaseID != h.LeaseID || current.ContainerID != h.ContainerID || current.TrustedMeterBindingSHA256 != h.TrustedMeterBindingSHA256 {
 		return runtime.ErrTrustedRuntime

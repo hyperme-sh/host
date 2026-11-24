@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -93,20 +96,35 @@ func (m *Metal) Start(ctx context.Context, spec Spec) (*Handle, error) {
 	}, nil
 }
 
-// Stop kills the host llama-server process.
+// Stop kills the host llama-server process. A stale PID must not signal
+// an unrelated process that reused the number after an agent restart.
 func (m *Metal) Stop(ctx context.Context, h *Handle) error {
 	if h == nil {
 		return errors.New("hypermesh runtime: nil handle")
 	}
-	target := h.ContainerID
-	if target == "" {
-		target = h.Name
+	pid, err := strconv.ParseInt(strings.TrimSpace(h.ContainerID), 10, 32)
+	if err != nil || pid <= 1 {
+		return errors.New("hypermesh runtime: invalid Metal process ID")
 	}
-	if target == "" {
-		return errors.New("hypermesh runtime: empty handle")
+	target := strconv.FormatInt(pid, 10)
+	out, err := m.run(ctx, "/bin/ps", "-p", target, "-o", "comm=")
+	command := strings.TrimSpace(string(out))
+	var exited *exec.ExitError
+	if errors.Is(err, syscall.ESRCH) || (errors.As(err, &exited) && exited.ExitCode() == 1 && command == "") {
+		return nil
 	}
-	_, err := m.run(ctx, "kill", target)
 	if err != nil {
+		return fmt.Errorf("hypermesh runtime: inspect Metal process: %w", err)
+	}
+	bin := strings.TrimSpace(m.Bin)
+	if bin == "" {
+		bin = "llama-server"
+	}
+	if filepath.Base(command) != filepath.Base(bin) {
+		return nil
+	}
+	out, err = m.run(ctx, "/bin/kill", "-KILL", target)
+	if err != nil && !errors.Is(err, syscall.ESRCH) && !strings.Contains(strings.ToLower(string(out)), "no such process") {
 		return fmt.Errorf("hypermesh runtime: metal stop: %w", err)
 	}
 	return nil
