@@ -48,6 +48,7 @@
     <button type="button" id="resume">Resume selling</button>
     <button type="button" id="stop">Stop lease</button>
   </div>
+  <p id="recovery_notice" class="err" role="status" hidden></p>
   <p id="action" class="hint"></p>
   <p id="err" class="err" hidden></p>
 
@@ -91,6 +92,9 @@
 
   function render(s) {
     status = s || {};
+    var recovery = document.getElementById("recovery_notice");
+    recovery.textContent = (status.recovery_notice || {}).message || "";
+    recovery.hidden = !recovery.textContent;
     document.getElementById("device_id").textContent = status.device_id || "—";
     document.getElementById("sell_state").textContent = status.sell_state || "—";
     document.getElementById("until_val").textContent = status.until || "—";

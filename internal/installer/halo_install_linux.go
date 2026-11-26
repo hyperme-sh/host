@@ -272,6 +272,15 @@ func installIsolatedTest(ctx context.Context, path, digest string, profile isola
 	if err != nil {
 		return err
 	}
+	profileName := strings.TrimPrefix(filepath.Base(profile.config), "hypermesh-")
+	recovery, ok := installedRecoveryProfile(profileName)
+	if !ok || recovery.state != profile.state || recovery.unit != filepath.Base(profile.unit) {
+		return fmt.Errorf("unknown isolated Host recovery profile")
+	}
+	if err := installWatchdog(ctx, recovery, p.ReleaseURL, p.Channel, int(meta.Build), digestSetupBytes(binary),
+		[]byte(p.PublicKey), p.Fingerprints); err != nil {
+		return fmt.Errorf("install isolated Host recovery watchdog: %w", err)
+	}
 	status := publicRegistration(j)
 	status.NextAction = "Bind the TEST device to its shared capacity slot before activating the TEST service."
 	return json.NewEncoder(out).Encode(status)

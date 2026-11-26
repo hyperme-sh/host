@@ -154,6 +154,16 @@ func (a *Agent) selectedSelfUpdate(ctx context.Context, busy bool, target string
 	if err != nil {
 		return err
 	}
+	if runtime.GOOS == "linux" {
+		unlock, err := update.LockProfile(filepath.Join(filepath.Dir(marker), update.ProfileLockName))
+		if errors.Is(err, update.ErrProfileBusy) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("lock Host update profile: %w", err)
+		}
+		defer unlock()
+	}
 	badBuild, err := update.ReadBadBuild(filepath.Join(filepath.Dir(marker), update.BadName))
 	if err != nil {
 		return err
@@ -180,7 +190,7 @@ func (a *Agent) selectedSelfUpdate(ctx context.Context, busy bool, target string
 		Restart: func(ctx context.Context) error {
 			return update.RestartInstalledAgent(ctx, binary, filepath.Dir(marker))
 		},
-		Log:       a.log,
+		Log: a.log,
 	}
 	var plan update.Plan
 	if revert {
