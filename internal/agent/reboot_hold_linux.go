@@ -98,7 +98,7 @@ func (a *Agent) verifyManagedReboot(ctx context.Context, reboot api.HostHealth, 
 	if !rebootHeld(reboot) || reboot.RebootRequired == nil || *reboot.RebootRequired ||
 		a.cfg.ManagedDeviceID == "" || !strings.HasPrefix(strings.ToLower(a.cfg.HostName), "halo") ||
 		a.maintenanceHeld() || a.cfg.Validate() != nil || boot == "" || environment == "" ||
-		hb.DeviceID != a.state.DeviceID || hb.PathBState != api.PathBGreen ||
+		hb.DeviceID != a.state.DeviceID || hb.EffectiveCertificationState() != api.PathBGreen ||
 		health.LeaseContainerCount == nil || *health.LeaseContainerCount != 0 ||
 		a.localLease() != nil {
 		return

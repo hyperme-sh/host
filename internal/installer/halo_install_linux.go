@@ -281,6 +281,12 @@ func installIsolatedTest(ctx context.Context, path, digest string, profile isola
 		[]byte(p.PublicKey), p.Fingerprints); err != nil {
 		return fmt.Errorf("install isolated Host recovery watchdog: %w", err)
 	}
+	if _, err := (setupSource{}).output(ctx, "systemctl", "daemon-reload"); err != nil {
+		return fmt.Errorf("reload isolated Host service configuration: %w", err)
+	}
+	if _, err := (setupSource{}).output(ctx, "systemctl", "enable", filepath.Base(profile.unit)); err != nil {
+		return fmt.Errorf("enable isolated Host service at boot: %w", err)
+	}
 	status := publicRegistration(j)
 	status.NextAction = "Bind the TEST device to its shared capacity slot before activating the TEST service."
 	return json.NewEncoder(out).Encode(status)

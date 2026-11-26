@@ -562,7 +562,7 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 	a.recordHeartbeat(nil)
 	a.log.Info("heartbeat accepted",
 		"device_id", hb.DeviceID,
-		"path_b_state", hb.PathBState,
+		"certification_state", hb.EffectiveCertificationState(),
 		"sell_state", sell.SellState,
 		"nvpmodel", snap.Nvpmodel,
 		"backend", runtime.HostLogLabel(),
@@ -817,7 +817,8 @@ func (a *Agent) pullAndRun(ctx context.Context) error {
 		hb.DeviceID == a.state.DeviceID && hb.NativeCertificationDue &&
 		strings.HasPrefix(hb.HardwareShapeSignature, "sha256:") && len(hb.HardwareShapeSignature) == 71 &&
 		time.Since(hb.AcceptedAt) >= 0 && time.Since(hb.AcceptedAt) <= 2*time.Minute &&
-		(posture.SellState == api.SellPaused || posture.SellState == api.SellNA) && a.currentLease() == nil && !a.pendingResult.Load() {
+		(posture.SellState == api.SellPaused || posture.SellState == api.SellNA || rebootHeld(a.rebootHealth())) &&
+		a.currentLease() == nil && !a.pendingResult.Load() {
 		a.maintenanceMu.Lock()
 		if !a.maintenanceHeld() && time.Now().After(a.nativeRetryAfter) {
 			if err := a.cfg.RunAutomaticNative(ctx, a.cfg, a.state, hb.HardwareShapeSignature); err != nil {
