@@ -80,7 +80,7 @@ func isolatedTestAgent(p agentInstallPlan, j registrationJournal, profile isolat
 	cfg := agent.Config{ControlPlaneURL: p.ControlPlane, TenantID: p.TenantID,
 		HostName: strings.ToLower(p.HostName), ManagedDeviceID: j.DeviceID}
 	identity, _ := json.Marshal(cfg.RegisteredProfileState(keyDir, j.Request.CredentialPrefix, j.DeviceSecret))
-	paused, _ := json.Marshal(agent.SellPosture{SellState: api.SellPaused, Source: agent.SellSourceOwner})
+	unadvertised, _ := json.Marshal(agent.SellPosture{SellState: api.SellNA})
 	settings := [][2]string{
 		{"HYPERMESH_CONTROL_PLANE_URL", cfg.ControlPlaneURL},
 		{"HYPERMESH_TENANT_ID", cfg.TenantID},
@@ -108,7 +108,7 @@ func isolatedTestAgent(p agentInstallPlan, j registrationJournal, profile isolat
 		"\nRestart=on-failure\nRestartSec=5\nKillMode=control-group\n\n[Install]\nWantedBy=multi-user.target\n"
 	return []agentPayload{
 		haloPayload(keyDir+"/hypermesh.key", []byte(j.PrivateKey+"\n"), 0600),
-		haloPayload(profile.state+"/sell.json", paused, 0600),
+		haloPayload(profile.state+"/sell.json", unadvertised, 0600),
 		haloPayload(profile.state+"/device.json", identity, 0600),
 		haloPayload(profile.config+"/agent.env", []byte(environment.String()), 0600),
 		haloPayload(profile.unit, []byte(unit), 0644),

@@ -177,6 +177,9 @@ func (a *Agent) selectedSelfUpdate(ctx context.Context, busy bool, target string
 	hooks := update.Hooks{
 		Source:    a.updateSource(),
 		StillBusy: a.Busy,
+		Restart: func(ctx context.Context) error {
+			return update.RestartInstalledAgent(ctx, binary, filepath.Dir(marker))
+		},
 		Log:       a.log,
 	}
 	var plan update.Plan

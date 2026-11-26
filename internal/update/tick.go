@@ -339,10 +339,26 @@ func osRead(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-// RestartAgent restarts hypermesh-agent and nothing else.
+// RestartAgent queues a restart for the standard agent service.
 func RestartAgent(ctx context.Context) error {
-	// Do not wait for systemd to terminate this calling process.
 	return restart(ctx, "systemctl", "--no-block", "restart", AgentUnit)
+}
+
+// RestartInstalledAgent maps only the installer-owned isolated paths to
+// their units. A supplied unit name is never accepted from update metadata.
+func RestartInstalledAgent(ctx context.Context, binaryPath, stateDir string) error {
+	unit := AgentUnit
+	switch {
+	case binaryPath == "/etc/hypermesh-halo-test/hypermesh-agent" && stateDir == "/var/lib/hypermesh-halo-test":
+		unit = "hypermesh-halo-test-agent.service"
+	case binaryPath == "/etc/hypermesh-forum-test/hypermesh-agent" && stateDir == "/var/lib/hypermesh-forum-test":
+		unit = "hypermesh-forum-test-agent.service"
+	case strings.HasPrefix(binaryPath, "/etc/hypermesh-halo-test/"),
+		strings.HasPrefix(binaryPath, "/etc/hypermesh-forum-test/"),
+		stateDir == "/var/lib/hypermesh-halo-test", stateDir == "/var/lib/hypermesh-forum-test":
+		return fmt.Errorf("hypermesh update: installed profile paths do not match")
+	}
+	return restart(ctx, "systemctl", "--no-block", "restart", unit)
 }
 
 func restart(ctx context.Context, name string, args ...string) error {
@@ -351,11 +367,19 @@ func restart(ctx context.Context, name string, args ...string) error {
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("hypermesh update: systemctl restart %s", AgentUnit)
+		return fmt.Errorf("hypermesh update: systemctl restart %s", args[2])
 	}
 	return nil
 }
 
 func restartAllowed(name string, args []string) bool {
-	return name == "systemctl" && len(args) == 3 && args[0] == "--no-block" && args[1] == "restart" && args[2] == AgentUnit
+	if name != "systemctl" || len(args) != 3 || args[0] != "--no-block" || args[1] != "restart" {
+		return false
+	}
+	switch args[2] {
+	case AgentUnit, "hypermesh-halo-test-agent.service", "hypermesh-forum-test-agent.service":
+		return true
+	default:
+		return false
+	}
 }

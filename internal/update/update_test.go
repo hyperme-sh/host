@@ -2831,3 +2831,22 @@ func TestRestartAgentQueuesOnlyItsOwnUnit(t *testing.T) {
 		}
 	}
 }
+
+func TestRestartInstalledAgentOnlyTargetsMatchingProfile(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\n[ \"$#\" -eq 3 ] && [ \"$1\" = --no-block ] && [ \"$2\" = restart ] && [ \"$3\" = \"$EXPECTED_UNIT\" ]\n"
+	if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	for _, profile := range []string{"halo", "forum"} {
+		prefix := "hypermesh-" + profile + "-test"
+		t.Setenv("EXPECTED_UNIT", prefix+"-agent.service")
+		if err := RestartInstalledAgent(context.Background(), "/etc/"+prefix+"/hypermesh-agent", "/var/lib/"+prefix); err != nil {
+			t.Fatal(err)
+		}
+		if err := RestartInstalledAgent(context.Background(), "/etc/"+prefix+"/hypermesh-agent", "/var/lib/hypermesh"); err == nil {
+			t.Fatal("accepted a mismatched profile state path")
+		}
+	}
+}
