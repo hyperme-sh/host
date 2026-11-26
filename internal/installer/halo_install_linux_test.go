@@ -43,6 +43,14 @@ func TestHaloNativeScope(t *testing.T) {
 			}
 			j.DeviceID = "1753f9d3-cc40-415b-a6b8-a54029bc3348"
 			files := haloProfile(p, j)
+			var posture struct {
+				SellState string `json:"sell_state"`
+				Source    string `json:"source"`
+			}
+			if err := json.Unmarshal(files[1].Data, &posture); err != nil || posture.SellState != "n/a" || posture.Source != "" {
+				t.Fatalf("isolated install must enroll unadvertised without recording an owner pause: %+v, %v", posture, err)
+			}
+
 			var state agent.State
 			if err := json.Unmarshal(files[2].Data, &state); err != nil || state.ManagedScope == nil || state.DeviceID != j.DeviceID {
 				t.Fatalf("dedicated enrolled identity missing: %v", err)
