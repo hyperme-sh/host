@@ -272,3 +272,26 @@ func TestMinimumInstallationRechecksFreeMemoryWithoutSavedBudget(t *testing.T) {
   if (err==nil)!=(free>=MinimumFreeMemoryBytes) {t.Fatalf("free %d: %v",free,err)}
  }
 }
+
+func TestCertificationPreflightCanUseRunningKernelWithoutRewritingPlan(t *testing.T) {
+	f := newApplyFixture(t, false, false)
+	approved := f.plan.Platform.Kernel
+	read := f.deps.Source.ReadFile
+	f.deps.Source.ReadFile = func(path string) ([]byte, error) {
+		if path == "/proc/sys/kernel/osrelease" {
+			return []byte("8.0.0-11-generic\n"), nil
+		}
+		return read(path)
+	}
+	if _, _, err := validateSetupHost(context.Background(), f.plan, f.deps); err == nil ||
+		!strings.Contains(err.Error(), "kernel changed") {
+		t.Fatalf("installation gate did not reject kernel drift: %v", err)
+	}
+	f.deps.AllowKernelUpdate = true
+	if _, _, err := validateSetupHost(context.Background(), f.plan, f.deps); err != nil {
+		t.Fatalf("certification could not check the running kernel: %v", err)
+	}
+	if f.plan.Platform.Kernel != approved || len(f.calls) != 0 {
+		t.Fatal("read-only certification preflight changed the plan or host")
+	}
+}

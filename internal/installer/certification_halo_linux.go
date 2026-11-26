@@ -78,22 +78,41 @@ func readHaloNativePlan(path, digest string) (agentInstallPlan, error) {
 	return plan, nil
 }
 
-var versionedUbuntuKernelPackage = regexp.MustCompile(
-	`^linux-(?:headers|image-unsigned|image|main-modules-v4l2loopback|main-modules-zfs|modules-extra|modules|tools)-([0-9]+\.[0-9]+\.[0-9]+-[0-9]+)(?:-[a-z0-9-]+)?$`,
+// Match kernel payloads and kernel meta packages. Firmware, Mesa, Vulkan,
+// libdrm, and unrelated Linux packages retain the registration checks.
+var haloKernelPackage = regexp.MustCompile(
+	`^linux-(?:(?:libc-dev|perf|tools-common)|(?:headers|image-unsigned|image|main-modules-v4l2loopback|main-modules-zfs|modules-extra|modules|tools)-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+(?:-[a-z0-9-]+)?|(?:(?:headers|image|modules|tools)-)?(?:generic|virtual|lowlatency|oem)(?:-hwe-[0-9]+\.[0-9]+(?:-edge)?)?)$`,
 )
 
-func haloProtectedPackagesAfterKernelCleanup(p SetupPlan, installed map[string]string) []PackageChange {
-	running := strings.TrimSuffix(p.Platform.Kernel, "-generic")
-	protected := make([]PackageChange, 0, len(p.Platform.ProtectedPackages))
-	for _, pkg := range p.Platform.ProtectedPackages {
-		match := versionedUbuntuKernelPackage.FindStringSubmatch(packageBase(pkg.Name))
-		if installed[pkg.Name] == "" && len(match) == 2 && p.Platform.Kernel == running+"-generic" &&
-			match[1] != running {
-			continue
+func haloCertificationPackages(plan SetupPlan, installed map[string]string) ([]PackageChange, error) {
+	keep := func(packages []PackageChange) []PackageChange {
+		var retained []PackageChange
+		for _, pkg := range packages {
+			if !haloKernelPackage.MatchString(packageBase(pkg.Name)) {
+				retained = append(retained, pkg)
+			}
 		}
-		protected = append(protected, pkg)
+		return retained
 	}
-	return protected
+	plan.Platform.ProtectedPackages = keep(plan.Platform.ProtectedPackages)
+	// The current certification still checks the network and uses the existing
+	// enrollment. Allow Ubuntu NetworkManager package updates without waiving
+	// the requirement that previously installed packages remain present.
+	for i, pkg := range plan.Platform.ProtectedPackages {
+		base := packageBase(pkg.Name)
+		if version := installed[pkg.Name]; version != "" &&
+			(base == "network-manager" || strings.HasPrefix(base, "network-manager-")) {
+			plan.Platform.ProtectedPackages[i].To = version
+		}
+	}
+	plan.Packages = keep(plan.Packages)
+	runtimePackages := make(map[string]string, len(installed))
+	for name, version := range installed {
+		if !haloKernelPackage.MatchString(packageBase(name)) {
+			runtimePackages[name] = version
+		}
+	}
+	return registrationPackages(plan, runtimePackages)
 }
 
 func haloNativeInstallation(_ context.Context, digest, agentPlanPath string) (nativeInstallation, error) {
@@ -125,7 +144,11 @@ func haloNativeInstallation(_ context.Context, digest, agentPlanPath string) (na
 				return fmt.Errorf("reconcile local leases before native Halo certification")
 			}
 		}
-		fresh, err := registrationPreflight(ctx, plan, haloClass)
+		setup, err := reviewedRegistrationSetup(plan)
+		if err != nil {
+			return err
+		}
+		fresh, err := checkRegistrationPreflight(ctx, plan, haloClass, setup, true)
 		if err != nil {
 			return err
 		}
