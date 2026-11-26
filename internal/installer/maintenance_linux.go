@@ -17,6 +17,7 @@ import (
  "strings"
  "time"
 
+ "github.com/FyberLabs/hypermesh-host/internal/agent"
  "github.com/FyberLabs/hypermesh-host/internal/hostregistration"
 )
 type maintenancePlan struct{
@@ -229,6 +230,7 @@ func runMaintenance(ctx context.Context,args []string,out,diagnostic io.Writer,r
    remote,e:=client.CheckDevice(ctx,identity.Request,identity.DeviceID,identity.DeviceSecret)
    if e!=nil||remote.PathAState!="accepted"||remote.PathBState!="green"||remote.ScheduleHold==nil||*remote.ScheduleHold||remote.SellState!="paused"||remote.LastHeartbeatAt==nil||time.Since(*remote.LastHeartbeatAt)<0||time.Since(*remote.LastHeartbeatAt)>120*time.Second||remote.CheckedAt.Before(time.Now().Add(-30*time.Second))||remote.CheckedAt.After(time.Now().Add(30*time.Second)){err=fmt.Errorf("fresh plane readiness required before releasing the maintenance pause")}
   }
+  if err==nil{err=agent.ConfirmPostRebootReadiness("/var/lib/hypermesh",boot)}
   if err==nil{
    if _,e:=os.Lstat("/var/lib/hypermesh/maintenance.json");e==nil{
     err=maintenanceMarkerMatches(p.SHA256);if err==nil{err=os.Remove("/var/lib/hypermesh/maintenance.json")}

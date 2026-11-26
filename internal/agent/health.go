@@ -523,3 +523,8 @@ func (a *Agent) heartbeatAgeSeconds() (float64, bool) {
 	}
 	return float64(age), true
 }
+
+func rebootHeld(health api.HostHealth) bool {
+	return (health.RebootRequired != nil && *health.RebootRequired) ||
+		(health.PostRebootReady != nil && !*health.PostRebootReady)
+}
