@@ -86,6 +86,8 @@ type ownerLeaseStopResponse struct {
 
 // ownerStatusResponse is GET /v0/status. JSON only. No secrets.
 type ownerStatusResponse struct {
+	RebootRequired  *bool `json:"reboot_required,omitempty"`
+	PostRebootReady *bool `json:"post_reboot_ready,omitempty"`
  Maintenance bool `json:"maintenance"`
  WorkPending bool `json:"work_pending"`
 	DeviceID  string            `json:"device_id"`
@@ -253,7 +255,9 @@ func (a *Agent) handleOwnerConsole(w http.ResponseWriter, r *http.Request) {
 
 func (a *Agent) ownerStatus(ctx context.Context) ownerStatusResponse {
 	sell := a.effectiveSell()
+	reboot := a.rebootHealth()
 	out := ownerStatusResponse{
+		RebootRequired: reboot.RebootRequired, PostRebootReady: reboot.PostRebootReady,
  Maintenance:a.maintenanceHeld(), WorkPending:a.pendingResult.Load(),
 		DeviceID:  strings.TrimSpace(a.state.DeviceID),
 		SellState: sell.SellState,

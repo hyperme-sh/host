@@ -530,6 +530,13 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 	}
 	image := firstNonEmpty(a.cfg.ImageHash, snap.ImageHash)
 	sell := a.effectiveSell()
+	health := a.safeHealth(ctx)
+	reboot := a.rebootHealth()
+	health.RebootRequired = reboot.RebootRequired
+	health.PostRebootReady = reboot.PostRebootReady
+	if rebootHeld(reboot) && sell.SellState == api.SellSelling {
+		sell.SellState = api.SellDraining
+	}
 	name := strings.TrimSpace(a.cfg.HostName)
 	if name == "" {
 		name, _ = os.Hostname()
@@ -544,12 +551,13 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 		UptimeS:         snap.UptimeS,
 		ThermalC:        snap.ThermalC,
 		SellState:       sell.SellState,
-		Health:          a.safeHealth(ctx),
+		Health:          health,
 	})
 	if err != nil {
 		a.recordHeartbeat(err)
 		return err
 	}
+	a.verifyManagedReboot(ctx, reboot, health, snap.BootID, snap.EnvironmentHash, hb)
 	a.nativeHeartbeat.Store(&hb)
 	a.recordHeartbeat(nil)
 	a.log.Info("heartbeat accepted",
@@ -1265,6 +1273,12 @@ func (a *Agent) backendStub(job api.Job) (pathb.Result, bool) {
 }
 
 func (a *Agent) leaseStart(ctx context.Context, job api.Job) pathb.Result {
+	if rebootHeld(a.rebootHealth()) {
+		existing := a.localLease()
+		if existing == nil || !existing.Serving() || existing.LeaseID != job.LeaseID {
+			return pathb.Result{Passed: false, Reason: "reboot readiness required"}
+		}
+	}
 	if a.cfg.SupervisorHost() {
 		a.log.Info("lease_start refused", "reason", SupervisorLeaseRefuse, "host_type", HostTypeSupervisor)
 		return pathb.Result{Passed: false, Reason: SupervisorLeaseRefuse}
