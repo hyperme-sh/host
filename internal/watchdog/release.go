@@ -18,9 +18,12 @@ var (
 // Release identifies an artifact only after the signed manifest has been
 // checked against the local profile and its last installed build.
 type Release struct {
-	Manifest update.Manifest
-	Binary   string
+	Manifest  update.Manifest
+	binary    string
+	checksums []byte
 }
+
+func (r Release) BinaryName() string { return r.binary }
 
 func VerifyRelease(checksums, signature, manifest, publicKey []byte, fingerprints []string,
 	channel, platform, arch string, minimumBuild int,
@@ -63,5 +66,5 @@ func verifyRelease(checksums, signature, manifest, publicKey []byte, fingerprint
 	if release.ReleaseID != id {
 		return Release{}, errors.New("signed Host release ID mismatch")
 	}
-	return Release{Manifest: release, Binary: fmt.Sprintf("hypermesh-agent_%s_%s_%s", release.Version, platform, arch)}, nil
+	return Release{Manifest: release, binary: fmt.Sprintf("hypermesh-agent_%s_%s_%s", release.Version, platform, arch), checksums: append([]byte(nil), checksums...)}, nil
 }

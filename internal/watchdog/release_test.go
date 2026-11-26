@@ -38,7 +38,7 @@ func TestSignedReleaseProfileContract(t *testing.T) {
 	} {
 		release, err := verifyRelease(checksums, signature, manifest, pub, fingerprints,
 			target.channel, target.platform, target.arch, target.minimum, verify)
-		if (err == nil) != (target.want != "") || release.Binary != target.want {
+		if (err == nil) != (target.want != "") || release.BinaryName() != target.want {
 			t.Fatalf("%+v: %+v, %v", target, release, err)
 		}
 	}
