@@ -56,6 +56,12 @@ func Main() {
  }
  if os.Args[1] == "advanced-help" { advancedUsage(); fmt.Println("  measure-certification --help: local measured certification evidence (Linux and native Mac)"); return }
  name := os.Args[1]
+ if name == "recovery-watchdog" {
+  ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+  code := installer.RunWatchdog(ctx, os.Args[2:], os.Stdout, os.Stderr)
+  stop()
+  os.Exit(code)
+ }
  if name == "protection" { os.Exit(protection.Run(os.Args[2:],os.Stdout,os.Stderr)) }
  if name=="plan-installer-update"||name=="update-installer"||name=="rollback-installer"{ctx,stop:=signal.NotifyContext(context.Background(),syscall.SIGINT,syscall.SIGTERM);run:=installer.RunPlanInstallerUpdate;if name=="update-installer"{run=installer.RunUpdateInstaller};if name=="rollback-installer"{run=installer.RunRollbackInstaller};code:=run(ctx,os.Args[2:],os.Stdout,os.Stderr);stop();os.Exit(code)}
  if name=="plan-maintenance"||name=="maintain-agent"||name=="resume-agent"{ctx,stop:=signal.NotifyContext(context.Background(),syscall.SIGINT,syscall.SIGTERM);run:=installer.RunPlanMaintenance;if name=="maintain-agent"{run=installer.RunMaintainAgent};if name=="resume-agent"{run=installer.RunResumeAgent};code:=run(ctx,os.Args[2:],os.Stdout,os.Stderr);stop();os.Exit(code)}

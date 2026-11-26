@@ -21,6 +21,7 @@ import (
 	"github.com/FyberLabs/hypermesh-host/internal/api"
 	"github.com/FyberLabs/hypermesh-host/internal/pathb"
 	"github.com/FyberLabs/hypermesh-host/internal/runtime"
+	"github.com/FyberLabs/hypermesh-host/internal/watchdog"
 )
 
 //go:embed console.html
@@ -86,6 +87,7 @@ type ownerLeaseStopResponse struct {
 
 // ownerStatusResponse is GET /v0/status. JSON only. No secrets.
 type ownerStatusResponse struct {
+	RecoveryNotice *watchdog.Notice `json:"recovery_notice,omitempty"`
 	RebootRequired  *bool `json:"reboot_required,omitempty"`
 	PostRebootReady *bool `json:"post_reboot_ready,omitempty"`
  Maintenance bool `json:"maintenance"`
@@ -257,6 +259,7 @@ func (a *Agent) ownerStatus(ctx context.Context) ownerStatusResponse {
 	sell := a.effectiveSell()
 	reboot := a.rebootHealth()
 	out := ownerStatusResponse{
+		RecoveryNotice: watchdog.ReadNotice(a.cfg.StateDir),
 		RebootRequired: reboot.RebootRequired, PostRebootReady: reboot.PostRebootReady,
  Maintenance:a.maintenanceHeld(), WorkPending:a.pendingResult.Load(),
 		DeviceID:  strings.TrimSpace(a.state.DeviceID),

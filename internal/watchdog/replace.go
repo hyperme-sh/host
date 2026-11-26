@@ -10,16 +10,23 @@ import (
 	"github.com/FyberLabs/hypermesh-host/internal/update"
 )
 
+// CheckPayload verifies the exact executable selected from this signed release.
+func (r Release) CheckPayload(payload []byte) error {
+	if len(payload) == 0 || len(payload) > update.MaxDownloadBytes {
+		return errors.New("invalid recovery payload size")
+	}
+	return update.CheckHash(r.checksums, r.BinaryName(), payload)
+}
+
 // Replace installs authenticated bytes over a missing or damaged executable.
 // The caller supplies the fixed installer-owned target and keeps the shared
 // profile lock held. Recheck must establish that the service is still down
 // and that workload ownership is clear immediately before the rename.
 func (r Release) Replace(ctx context.Context, target string, payload []byte, recheck func(context.Context) error) error {
-	if len(payload) == 0 || len(payload) > update.MaxDownloadBytes ||
-		!filepath.IsAbs(target) || recheck == nil {
+	if !filepath.IsAbs(target) || recheck == nil {
 		return errors.New("invalid watchdog replacement")
 	}
-	if err := update.CheckHash(r.checksums, r.BinaryName(), payload); err != nil {
+	if err := r.CheckPayload(payload); err != nil {
 		return err
 	}
 	info, err := os.Lstat(target)

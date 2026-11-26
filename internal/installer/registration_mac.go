@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -407,6 +408,11 @@ func runMacRegister(ctx context.Context, args []string, out, diagnostic io.Write
 			return e
 		}
 		return macServices(ctx, d, j.DeviceID != "", false)
+	}
+	if runtime.GOOS == "darwin" && d.root == "" {
+		if err := installMacWatchdog(ctx, agent); err != nil {
+			return fail(fmt.Errorf("install Host recovery watchdog: %w", err))
+		}
 	}
 	checked := preflightMacRemote{remote, check}
 	err = finishRegistration(ctx, &j, checked, save, func(value registrationJournal) error {

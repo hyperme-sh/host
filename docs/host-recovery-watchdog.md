@@ -50,3 +50,21 @@ managers and signed fixtures. Cover both Linux architectures and Darwin,
 wrong-channel and wrong-profile artifacts, interrupted replacement, ownership
 uncertainty, failure backoff, and state preservation. Then wire the watchdog
 service into each installer and qualify the platform contracts through CI.
+
+## Installed watchdog
+
+The standard Linux installer registers `hypermesh-recovery.timer` and its
+oneshot service. The timer checks every five minutes after activation. The
+macOS owner registration installer loads a separate
+`com.fyberlabs.hypermesh-recovery` LaunchDaemon with the same interval. The
+watchdog uses a signed copy of the release installer in
+`/usr/local/libexec/hypermesh-recovery`.
+
+On macOS, the owner registration command needs the verified bootstrap
+metadata and public key beside the installer. The recovery LaunchDaemon
+needs a root-managed GnuPG installation. Its search path accepts a
+root-managed MacGPG2 package or system GnuPG and excludes Homebrew.
+
+Terminal recovery notices appear in the local owner console and service
+logs. To read the notice while the agent is down, run
+`sudo /usr/local/libexec/hypermesh-recovery recovery-watchdog status`.
