@@ -78,7 +78,7 @@ func watchdogRead(path string, limit int64) ([]byte, error) {
 
 func (h hostRecovery) service(ctx context.Context) (running bool, down bool, err error) {
 	if runtime.GOOS == "linux" {
-		raw, err := h.command(ctx, "/usr/bin/systemctl", "show", "--property=LoadState,ActiveState,MainPID", "--", "hypermesh-agent.service")
+		raw, err := h.command(ctx, "/usr/bin/systemctl", "show", "--property=LoadState,ActiveState,MainPID,SubState", "--", "hypermesh-agent.service")
 		if err != nil {
 			return false, false, err
 		}
@@ -95,7 +95,7 @@ func (h hostRecovery) service(ctx context.Context) (running bool, down bool, err
 }
 
 func systemdRecoveryState(parts []string) (bool, bool, error) {
-	if len(parts) != 3 || !strings.HasPrefix(parts[0], "ActiveState=") || parts[1] != "LoadState=loaded" {
+	if len(parts) != 4 || !strings.HasPrefix(parts[0], "ActiveState=") || parts[1] != "LoadState=loaded" {
 		return false, false, errors.New("unable to identify the installed agent service")
 	}
 	rawPID, ok := strings.CutPrefix(parts[2], "MainPID=")
@@ -104,7 +104,8 @@ func systemdRecoveryState(parts []string) (bool, bool, error) {
 		return false, false, errors.New("unable to read the installed agent PID")
 	}
 	return parts[0] == "ActiveState=active" && pid > 0,
-		parts[0] == "ActiveState=failed" && pid == 0, nil
+		pid == 0 && (parts[0] == "ActiveState=failed" ||
+			(parts[0] == "ActiveState=activating" && parts[3] == "SubState=auto-restart")), nil
 }
 
 func launchdRecoveryState(raw string) (bool, bool, error) {

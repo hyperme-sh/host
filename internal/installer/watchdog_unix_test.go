@@ -34,20 +34,22 @@ func TestWatchdogServiceStateRequiresKnownStoppedProfile(t *testing.T) {
 	for _, test := range []struct {
 		state         string
 		pid           string
+		sub           string
 		running, down bool
 	}{
-		{"active", "11", true, false},
-		{"failed", "0", false, true},
-		{"inactive", "0", false, false},
-		{"activating", "0", false, false},
-		{"deactivating", "11", false, false},
+		{"active", "11", "running", true, false},
+		{"failed", "0", "failed", false, true},
+		{"inactive", "0", "dead", false, false},
+		{"activating", "0", "start", false, false},
+		{"activating", "0", "auto-restart", false, true},
+		{"deactivating", "11", "stop", false, false},
 	} {
-		running, down, err := systemdRecoveryState([]string{"ActiveState=" + test.state, "LoadState=loaded", "MainPID=" + test.pid})
+		running, down, err := systemdRecoveryState([]string{"ActiveState=" + test.state, "LoadState=loaded", "MainPID=" + test.pid, "SubState=" + test.sub})
 		if err != nil || running != test.running || down != test.down {
 			t.Fatalf("systemd state %+v: %v %v %v", test, running, down, err)
 		}
 	}
-	if _, down, err := systemdRecoveryState([]string{"ActiveState=failed", "LoadState=loaded", "MainPID=unknown"}); err == nil || down {
+	if _, down, err := systemdRecoveryState([]string{"ActiveState=failed", "LoadState=loaded", "MainPID=unknown", "SubState=failed"}); err == nil || down {
 		t.Fatal("unknown PID treated as stopped")
 	}
 	identity := "\tprogram = " + watchdogAgent + "\n"
