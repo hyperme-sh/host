@@ -107,10 +107,21 @@ func haloCertificationPackages(plan SetupPlan, installed map[string]string) ([]P
 	}
 	plan.Packages = keep(plan.Packages)
 	runtimePackages := make(map[string]string, len(installed))
+	protected := make(map[string]bool, len(plan.Platform.ProtectedPackages))
+	for _, pkg := range plan.Platform.ProtectedPackages {
+		protected[pkg.Name] = true
+	}
 	for name, version := range installed {
-		if !haloKernelPackage.MatchString(packageBase(name)) {
-			runtimePackages[name] = version
+		base := packageBase(name)
+		if haloKernelPackage.MatchString(base) {
+			continue
 		}
+		// Ubuntu can add user-space ZFS helpers with its kernel modules.
+		// Existing protected packages and fresh storage checks still apply.
+		if (base == "zfs-zed" || base == "zfsutils-linux") && !protected[name] {
+			continue
+		}
+		runtimePackages[name] = version
 	}
 	return registrationPackages(plan, runtimePackages)
 }

@@ -49,6 +49,7 @@ func TestHaloCertificationAllowsKernelUpdatesAndChecksRuntimePackages(t *testing
 		"linux-headers-8.0.0-11": "2", "linux-generic-hwe-26.04": "2",
 		"linux-headers-generic-hwe-26.04": "2", "linux-libc-dev:amd64": "2",
 		"linux-perf": "2", "linux-tools-common": "2", "network-manager": "2",
+		"zfs-zed": "2", "zfsutils-linux": "2",
 	}
 	if remaining, err := haloCertificationPackages(plan, installed); err != nil || len(remaining) != 0 {
 		t.Fatalf("kernel update prevented certification: %v, %v", remaining, err)
@@ -61,6 +62,12 @@ func TestHaloCertificationAllowsKernelUpdatesAndChecksRuntimePackages(t *testing
 		t.Fatalf("removed NetworkManager was accepted: %v", err)
 	}
 	installed["network-manager"] = "2"
+	withZFS := plan
+	withZFS.Platform.ProtectedPackages = append(append([]PackageChange(nil), plan.Platform.ProtectedPackages...),
+		PackageChange{Name: "zfs-zed", To: "1"})
+	if _, err := haloCertificationPackages(withZFS, installed); err == nil || !strings.Contains(err.Error(), "zfs-zed") {
+		t.Fatalf("change to a previously protected ZFS package was accepted: %v", err)
+	}
 	for _, runtimePackage := range []string{"libvulkan1", "mesa-vulkan-drivers", "linux-firmware"} {
 		installed[runtimePackage] = "2"
 		if _, err := haloCertificationPackages(plan, installed); err == nil || !strings.Contains(err.Error(), runtimePackage) {
