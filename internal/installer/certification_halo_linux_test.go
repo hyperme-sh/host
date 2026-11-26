@@ -30,25 +30,42 @@ func TestReadHaloNativePlanAcceptsApprovedSeparateInstallationPlan(t *testing.T)
 	}
 }
 
-func TestHaloKernelCleanupKeepsRunningAndRuntimePackagesProtected(t *testing.T) {
+func TestHaloCertificationAllowsKernelUpdatesAndChecksRuntimePackages(t *testing.T) {
 	var plan SetupPlan
+	plan.Profile = &SetupProfile{ID: "ubuntu-amd-halo-vulkan", RequiredPackages: []string{"docker.io"}}
+	plan.Preflight.Hardware.Facts.Arch = "amd64"
 	plan.Platform.Kernel = "7.3.0-10-generic"
 	for _, name := range []string{
-		"linux-headers-7.3.0-9", "linux-main-modules-zfs-7.3.0-9-generic",
-		"linux-image-unsigned-7.3.0-9-generic",
-		"linux-headers-7.3.0-10", "linux-modules-7.3.0-10-generic",
-		"linux-generic", "libvulkan1", "mesa-vulkan-drivers",
+		"linux-image-7.3.0-10-generic", "linux-modules-7.3.0-10-generic",
+		"linux-generic-hwe-26.04", "linux-headers-generic-hwe-26.04",
+		"linux-libc-dev:amd64", "linux-perf", "linux-tools-common", "network-manager",
+		"libvulkan1", "mesa-vulkan-drivers", "linux-firmware",
 	} {
-		plan.Platform.ProtectedPackages = append(plan.Platform.ProtectedPackages, PackageChange{Name: name, To: "expected"})
+		plan.Platform.ProtectedPackages = append(plan.Platform.ProtectedPackages, PackageChange{Name: name, To: "1"})
 	}
-	installed := map[string]string{"linux-image-unsigned-7.3.0-9-generic": "changed"}
-	got := haloProtectedPackagesAfterKernelCleanup(plan, installed)
-	if len(got) != 6 || got[0].Name != "linux-image-unsigned-7.3.0-9-generic" {
-		t.Fatalf("unexpected protected package set: %v", got)
+	installed := map[string]string{
+		"docker.io": "1", "libvulkan1": "1", "mesa-vulkan-drivers": "1", "linux-firmware": "1",
+		"linux-image-unsigned-8.0.0-11-generic": "2", "linux-modules-8.0.0-11-generic": "2",
+		"linux-headers-8.0.0-11": "2", "linux-generic-hwe-26.04": "2",
+		"linux-headers-generic-hwe-26.04": "2", "linux-libc-dev:amd64": "2",
+		"linux-perf": "2", "linux-tools-common": "2", "network-manager": "2",
 	}
-	for i, pkg := range plan.Platform.ProtectedPackages[2:] {
-		if got[i] != pkg {
-			t.Fatalf("protected check lost for %s", pkg.Name)
+	if remaining, err := haloCertificationPackages(plan, installed); err != nil || len(remaining) != 0 {
+		t.Fatalf("kernel update prevented certification: %v, %v", remaining, err)
+	}
+	if _, err := registrationPackages(plan, installed); err == nil {
+		t.Fatal("the installation package gate accepted changed kernel packages")
+	}
+	delete(installed, "network-manager")
+	if _, err := haloCertificationPackages(plan, installed); err == nil || !strings.Contains(err.Error(), "network-manager") {
+		t.Fatalf("removed NetworkManager was accepted: %v", err)
+	}
+	installed["network-manager"] = "2"
+	for _, runtimePackage := range []string{"libvulkan1", "mesa-vulkan-drivers", "linux-firmware"} {
+		installed[runtimePackage] = "2"
+		if _, err := haloCertificationPackages(plan, installed); err == nil || !strings.Contains(err.Error(), runtimePackage) {
+			t.Fatalf("runtime drift for %s was not rejected: %v", runtimePackage, err)
 		}
+		installed[runtimePackage] = "1"
 	}
 }

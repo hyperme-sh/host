@@ -236,14 +236,15 @@ func registrationPreflight(ctx context.Context,p agentInstallPlan,class string)(
  return registrationPreflightSetup(ctx,p,class,setup)
 }
 func registrationPreflightSetup(ctx context.Context,p agentInstallPlan,class string,setup SetupPlan)(Plan,error) {
+ return checkRegistrationPreflight(ctx,p,class,setup,false)
+}
+
+func checkRegistrationPreflight(ctx context.Context,p agentInstallPlan,class string,setup SetupPlan,allowKernelUpdate bool)(Plan,error) {
  var fresh Plan
- deps:=setupApplyDeps{Source:setupSource{},Preflight:func(ctx context.Context,plan SetupPlan)(Plan,error){var err error;fresh,err=freshSetupPreflight(ctx,plan);return fresh,err}}
+ deps:=setupApplyDeps{Source:setupSource{},AllowKernelUpdate:allowKernelUpdate,Preflight:func(ctx context.Context,plan SetupPlan)(Plan,error){var err error;fresh,err=freshSetupPreflight(ctx,plan);return fresh,err}}
  packages:=registrationPackages
- if _,managed:=nativeAutomatic(ctx);managed&&class==haloClass{
-  packages=func(p SetupPlan,installed map[string]string)([]PackageChange,error){
-   p.Platform.ProtectedPackages=haloProtectedPackagesAfterKernelCleanup(p,installed)
-   return registrationPackages(p,installed)
-  }
+ if allowKernelUpdate {
+  packages=haloCertificationPackages
  }
  remaining,target,err:=validateSetupHostPackages(ctx,setup,deps,packages)
  if err==nil&&(len(remaining)>0||(p.Setup.HeadlessRequested&&target!="multi-user.target")){err=fmt.Errorf("approved prerequisites are incomplete")}

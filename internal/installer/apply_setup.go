@@ -34,6 +34,7 @@ type setupJournal struct {
 }
 
 type setupApplyDeps struct {
+	AllowKernelUpdate bool
 	Source setupSource
 	Preflight func(context.Context, SetupPlan) (Plan, error)
 	Run func(context.Context, []string) error
@@ -182,7 +183,13 @@ func validateSetupHostPackages(ctx context.Context,p SetupPlan,deps setupApplyDe
  if id!=p.Platform.OS || version!=p.Platform.Version {return nil,"",fmt.Errorf("OS changed from %s %s to %s %s; review a fresh prerequisite plan",p.Platform.OS,p.Platform.Version,id,version)}
 	raw,err=deps.Source.read("/proc/sys/kernel/osrelease")
 	if err!=nil{return nil,"",fmt.Errorf("cannot recheck running kernel")}
- if current:=strings.TrimSpace(string(raw));current!=p.Platform.Kernel {return nil,"",fmt.Errorf("kernel changed from %s to %s; review a fresh prerequisite plan",p.Platform.Kernel,current)}
+	current := strings.TrimSpace(string(raw))
+	if current == "" {
+		return nil, "", fmt.Errorf("cannot identify running kernel")
+	}
+	if !deps.AllowKernelUpdate && current != p.Platform.Kernel {
+		return nil, "", fmt.Errorf("kernel changed from %s to %s; review a fresh prerequisite plan", p.Platform.Kernel, current)
+	}
 	raw,err=deps.Source.output(ctx,"systemctl","get-default")
 	if err!=nil {return nil,"",fmt.Errorf("cannot recheck boot target")}
 	target:=strings.TrimSpace(string(raw))
