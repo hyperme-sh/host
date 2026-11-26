@@ -85,16 +85,16 @@ type ManagedEnrollRequest struct {
 // Health is additive. Older planes ignore it (pydantic extra='ignore').
 // Existing fields stay. A missing Health is the pre-health body.
 type HeartbeatRequest struct {
-	HardwareShape *hardware.Shape `json:"hardware_shape,omitempty"`
-	EnvironmentHash string      `json:"environment_hash,omitempty"`
-	HostName        string      `json:"host_name,omitempty"`
-	DeviceID        string      `json:"device_id"`
-	ImageHash       string      `json:"image_hash,omitempty"`
-	LoadedModelHash string      `json:"loaded_model_hash,omitempty"`
-	UptimeS         int64       `json:"uptime_s"`
-	ThermalC        *float64    `json:"thermal_c,omitempty"`
-	SellState       SellState   `json:"sell_state,omitempty"`
-	Health          *HostHealth `json:"health,omitempty"`
+	HardwareShape   *hardware.Shape `json:"hardware_shape,omitempty"`
+	EnvironmentHash string          `json:"environment_hash,omitempty"`
+	HostName        string          `json:"host_name,omitempty"`
+	DeviceID        string          `json:"device_id"`
+	ImageHash       string          `json:"image_hash,omitempty"`
+	LoadedModelHash string          `json:"loaded_model_hash,omitempty"`
+	UptimeS         int64           `json:"uptime_s"`
+	ThermalC        *float64        `json:"thermal_c,omitempty"`
+	SellState       SellState       `json:"sell_state,omitempty"`
+	Health          *HostHealth     `json:"health,omitempty"`
 }
 
 // Sync error classes for HostHealth.LastSyncErrorClass. Empty means none
@@ -127,8 +127,8 @@ func TunnelHealthStates() []string {
 // an empty string when there is no class. last_sync_http_status is 0
 // when there is no status. A failed collection must not fail the heartbeat.
 type HostHealth struct {
-	RebootRequired  *bool `json:"reboot_required,omitempty"`
-	PostRebootReady *bool `json:"post_reboot_ready,omitempty"`
+	RebootRequired         *bool    `json:"reboot_required,omitempty"`
+	PostRebootReady        *bool    `json:"post_reboot_ready,omitempty"`
 	CertificationSeriesV3  bool     `json:"certification_series_v3,omitempty"`
 	CertificationProtocols []string `json:"certification_protocols,omitempty"`
 	TunnelState            string   `json:"tunnel_state,omitempty"`
@@ -181,12 +181,13 @@ const (
 
 // HeartbeatResponse is the 200 body from heartbeat.
 type HeartbeatResponse struct {
-	NativeCertificationDue bool `json:"native_certification_due,omitempty"`
-	HardwareShapeSignature string `json:"hardware_shape_signature,omitempty"`
-	DeviceID   string     `json:"device_id"`
-	PathBState PathBState `json:"path_b_state"`
-	SellState  SellState  `json:"sell_state,omitempty"`
-	AcceptedAt time.Time  `json:"accepted_at"`
+	NativeCertificationDue bool       `json:"native_certification_due,omitempty"`
+	HardwareShapeSignature string     `json:"hardware_shape_signature,omitempty"`
+	DeviceID               string     `json:"device_id"`
+	CertificationState     PathBState `json:"certification_state"`
+	PathBState             PathBState `json:"path_b_state"`
+	SellState              SellState  `json:"sell_state,omitempty"`
+	AcceptedAt             time.Time  `json:"accepted_at"`
 }
 
 // JobKind is a pulled job kind.
@@ -318,4 +319,11 @@ type TunnelAckRequest struct {
 // EnrollTokenResponse is POST /devices/{device_id}/enroll-token (platform).
 type EnrollTokenResponse struct {
 	EnrollToken string `json:"enroll_token"`
+}
+
+func (r HeartbeatResponse) EffectiveCertificationState() PathBState {
+	if r.CertificationState != "" {
+		return r.CertificationState
+	}
+	return r.PathBState
 }

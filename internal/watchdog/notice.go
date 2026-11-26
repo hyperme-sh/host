@@ -34,7 +34,7 @@ func ReadNotice(dir string) *Notice {
 		return nil
 	}
 	switch notice.Reason {
-	case "identity_missing", "retry_exhausted", "state_unavailable":
+	case "identity_missing", "retry_exhausted", "state_unavailable", "boot_start_disabled":
 		return &notice
 	default:
 		return nil

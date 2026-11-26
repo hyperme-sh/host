@@ -66,10 +66,11 @@ type watchdogConfig struct {
 }
 
 type hostRecovery struct {
-	profile    recoveryProfile
-	config     watchdogConfig
-	checkpoint watchdog.Checkpoint
-	command    func(context.Context, string, ...string) ([]byte, error)
+	startDisabled bool
+	profile       recoveryProfile
+	config        watchdogConfig
+	checkpoint    watchdog.Checkpoint
+	command       func(context.Context, string, ...string) ([]byte, error)
 }
 
 func rootWatchdogCommand(ctx context.Context, executable string, args ...string) ([]byte, error) {
@@ -111,7 +112,11 @@ func (h hostRecovery) service(ctx context.Context) (running bool, down bool, err
 		}
 		parts := strings.Fields(string(raw))
 		sort.Strings(parts)
-		return systemdRecoveryState(parts)
+		running, down, err := systemdRecoveryState(parts)
+		if err == nil && h.startDisabled && parts[0] == "ActiveState=inactive" && parts[2] == "MainPID=0" {
+			down = true
+		}
+		return running, down, err
 	}
 	raw, err := h.command(ctx, "/bin/launchctl", "print", "system/com.fyberlabs.hypermesh-agent")
 	if err != nil {
@@ -416,6 +421,14 @@ func RunWatchdog(ctx context.Context, args []string, out, diagnostic io.Writer) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
+	if runtime.GOOS == "linux" {
+		disabled, err := host.restoreBootStart(ctx)
+		if err != nil {
+			fmt.Fprintln(diagnostic, err)
+			return 1
+		}
+		host.startDisabled = disabled
+	}
 	result, err := watchdog.Check(ctx, host, state, time.Now())
 	var notice watchdog.Notice
 	switch result {
@@ -439,6 +452,29 @@ func RunWatchdog(ctx context.Context, args []string, out, diagnostic io.Writer) 
 		return 1
 	}
 	return 0
+}
+
+// The installer owns boot enablement for this exact service. Masked and
+// unavailable units require operator attention and are never overridden.
+func (h hostRecovery) restoreBootStart(ctx context.Context) (bool, error) {
+	if _, err := macRead(macPath("", filepath.Join(h.profile.state, "device.json")), 0600, 64<<10); err != nil {
+		return false, nil
+	}
+	out, err := h.command(ctx, "/usr/bin/systemctl", "is-enabled", "--", h.profile.unit)
+	if err == nil || strings.TrimSpace(string(out)) != "disabled" {
+		return false, nil
+	}
+	if _, _, err := h.service(ctx); err != nil {
+		return false, err
+	}
+	if _, err := h.command(ctx, "/usr/bin/systemctl", "enable", "--", h.profile.unit); err != nil {
+		notice := watchdog.Notice{Reason: "boot_start_disabled", Message: "Host recovery could not enable the agent service at boot."}
+		if noticeErr := publishWatchdogNotice(h.profile.state, notice); noticeErr != nil {
+			return false, errors.Join(err, noticeErr)
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func publishWatchdogNotice(state string, notice watchdog.Notice) error {
