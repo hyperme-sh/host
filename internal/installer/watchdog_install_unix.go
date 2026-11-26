@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/FyberLabs/hypermesh-host/internal/buildinfo"
 	"github.com/FyberLabs/hypermesh-host/internal/update"
@@ -54,10 +55,10 @@ const watchdogLaunchDaemon = `<?xml version="1.0" encoding="UTF-8"?>
 </dict></plist>
 `
 
-func installWatchdog(ctx context.Context, releaseURL, channel string, build int,
+func installWatchdog(ctx context.Context, profile recoveryProfile, releaseURL, channel string, build int,
 	agentHash string, key []byte, fingerprints []string,
 ) error {
-	stateDir := macPath("", watchdogStateDir)
+	stateDir := macPath("", profile.state)
 	if err := macDirectory(stateDir, false, true); err != nil {
 		return err
 	}
@@ -93,25 +94,33 @@ func installWatchdog(ctx context.Context, releaseURL, channel string, build int,
 		body []byte
 		mode os.FileMode
 	}{
-		{watchdogExecutable, executable, 0755},
-		{watchdogConfigPath, config, 0600},
+		{profile.executable, executable, 0755},
+		{profile.config, config, 0600},
 	} {
 		if err := installWatchdogFile(file.name, file.body, file.mode); err != nil {
 			return err
 		}
 	}
 	if runtime.GOOS == "linux" {
+		unitName := "hypermesh-recovery"
+		service := watchdogSystemdService
+		if profile.name != "standard" {
+			unitName += "-" + profile.name
+			service = strings.NewReplacer(watchdogExecutable, profile.executable,
+				standardRecoveryProfile.condition, profile.condition,
+				" recovery-watchdog\n", " recovery-watchdog "+profile.name+"\n").Replace(service)
+		}
 		for _, file := range []struct{ name, body string }{
-			{"service", watchdogSystemdService}, {"timer", watchdogSystemdTimer},
+			{"service", service}, {"timer", watchdogSystemdTimer},
 		} {
-			if err := installWatchdogFile("/etc/systemd/system/hypermesh-recovery."+file.name, []byte(file.body), 0644); err != nil {
+			if err := installWatchdogFile("/etc/systemd/system/"+unitName+"."+file.name, []byte(file.body), 0644); err != nil {
 				return err
 			}
 		}
 		if _, err := rootWatchdogCommand(ctx, "/usr/bin/systemctl", "daemon-reload"); err != nil {
 			return err
 		}
-		_, err := rootWatchdogCommand(ctx, "/usr/bin/systemctl", "enable", "--now", "hypermesh-recovery.timer")
+		_, err := rootWatchdogCommand(ctx, "/usr/bin/systemctl", "enable", "--now", unitName+".timer")
 		return err
 	}
 	plist := "/Library/LaunchDaemons/com.fyberlabs.hypermesh-recovery.plist"
@@ -205,5 +214,5 @@ func installMacWatchdog(ctx context.Context, agent []byte) error {
 	if err != nil || digest != digestSetupBytes(agent) {
 		return errors.New("installed macOS agent does not match the signed release")
 	}
-	return installWatchdog(ctx, source.ReleaseURL, source.Channel, source.Build, digest, key, fingerprints)
+	return installWatchdog(ctx, standardRecoveryProfile, source.ReleaseURL, source.Channel, source.Build, digest, key, fingerprints)
 }

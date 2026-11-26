@@ -31,6 +31,32 @@ const (
 	watchdogAgent      = "/usr/local/bin/hypermesh-agent"
 )
 
+type recoveryProfile struct {
+	name, config, state, agent, executable, unit, condition string
+}
+
+var standardRecoveryProfile = recoveryProfile{
+	name: "standard", config: watchdogConfigPath, state: watchdogStateDir,
+	agent: watchdogAgent, executable: watchdogExecutable,
+	unit: "hypermesh-agent.service", condition: watchdogStateDir + "/activation-approved",
+}
+
+func installedRecoveryProfile(name string) (recoveryProfile, bool) {
+	if name == "" || name == "standard" {
+		return standardRecoveryProfile, true
+	}
+	if runtime.GOOS != "linux" || (name != "halo-test" && name != "forum-test") {
+		return recoveryProfile{}, false
+	}
+	conf := "/etc/hypermesh-" + name
+	state := "/var/lib/hypermesh-" + name
+	return recoveryProfile{
+		name: name, config: conf + "/recovery-watchdog.json", state: state,
+		agent: conf + "/hypermesh-agent", executable: conf + "/hypermesh-recovery",
+		unit: "hypermesh-" + name + "-agent.service", condition: state + "/device.json",
+	}, true
+}
+
 type watchdogConfig struct {
 	Channel      string
 	Build        int
@@ -40,6 +66,7 @@ type watchdogConfig struct {
 }
 
 type hostRecovery struct {
+	profile    recoveryProfile
 	config     watchdogConfig
 	checkpoint watchdog.Checkpoint
 	command    func(context.Context, string, ...string) ([]byte, error)
@@ -78,7 +105,7 @@ func watchdogRead(path string, limit int64) ([]byte, error) {
 
 func (h hostRecovery) service(ctx context.Context) (running bool, down bool, err error) {
 	if runtime.GOOS == "linux" {
-		raw, err := h.command(ctx, "/usr/bin/systemctl", "show", "--property=LoadState,ActiveState,MainPID,SubState", "--", "hypermesh-agent.service")
+		raw, err := h.command(ctx, "/usr/bin/systemctl", "show", "--property=LoadState,ActiveState,MainPID,SubState", "--", h.profile.unit)
 		if err != nil {
 			return false, false, err
 		}
@@ -119,7 +146,7 @@ func launchdRecoveryState(raw string) (bool, bool, error) {
 
 func (h hostRecovery) Inspect(ctx context.Context) (watchdog.Health, error) {
 	var health watchdog.Health
-	raw, err := watchdogRead(filepath.Join(watchdogStateDir, "device.json"), 64<<10)
+	raw, err := watchdogRead(filepath.Join(h.profile.state, "device.json"), 64<<10)
 	if errors.Is(err, os.ErrNotExist) {
 		return health, nil
 	}
@@ -139,13 +166,13 @@ func (h hostRecovery) Inspect(ctx context.Context) (watchdog.Health, error) {
 		return health, err
 	}
 	health.Running = running
-	if installed, err := update.FileSHA256(watchdogAgent); err == nil {
+	if installed, err := update.FileSHA256(h.profile.agent); err == nil {
 		health.BinaryVerified = installed == h.config.SHA256
 	}
 	if !down {
 		return health, nil
 	}
-	raw, err = watchdogRead(filepath.Join(watchdogStateDir, "sell.json"), 64<<10)
+	raw, err = watchdogRead(filepath.Join(h.profile.state, "sell.json"), 64<<10)
 	if err == nil {
 		var posture struct {
 			SellState string `json:"sell_state"`
@@ -158,7 +185,7 @@ func (h hostRecovery) Inspect(ctx context.Context) (watchdog.Health, error) {
 		return health, err
 	}
 	for _, name := range []string{"lease.json", "maintenance.json", update.MarkerName} {
-		if _, err := os.Lstat(filepath.Join(watchdogStateDir, name)); !errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Lstat(filepath.Join(h.profile.state, name)); !errors.Is(err, os.ErrNotExist) {
 			return health, nil
 		}
 	}
@@ -192,7 +219,7 @@ func (h hostRecovery) Restart(ctx context.Context) error {
 		return err
 	}
 	if runtime.GOOS == "linux" {
-		_, err := h.command(ctx, "/usr/bin/systemctl", "start", "--", "hypermesh-agent.service")
+		_, err := h.command(ctx, "/usr/bin/systemctl", "start", "--", h.profile.unit)
 		return err
 	}
 	_, err := h.command(ctx, "/bin/launchctl", "kickstart", "system/com.fyberlabs.hypermesh-agent")
@@ -206,7 +233,7 @@ func (h hostRecovery) signedFloor() (int, error) {
 	if runtime.GOOS != "linux" {
 		return floor, nil
 	}
-	dir := filepath.Join(watchdogStateDir, "update-history")
+	dir := filepath.Join(h.profile.state, "update-history")
 	files, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return floor, nil
@@ -314,7 +341,7 @@ func (h hostRecovery) Repair(ctx context.Context) error {
 	if err := release.CheckPayload(payload); err != nil {
 		return err
 	}
-	bad, err := update.ReadBadBuild(filepath.Join(watchdogStateDir, update.BadName))
+	bad, err := update.ReadBadBuild(filepath.Join(h.profile.state, update.BadName))
 	if err != nil {
 		return err
 	}
@@ -331,11 +358,11 @@ func (h hostRecovery) Repair(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := release.Replace(ctx, watchdogAgent, payload, func(ctx context.Context) error {
+	if err := release.Replace(ctx, h.profile.agent, payload, func(ctx context.Context) error {
 		if err := h.idle(ctx); err != nil {
 			return err
 		}
-		return installWatchdogFile(watchdogConfigPath, config, 0600)
+		return installWatchdogFile(h.profile.config, config, 0600)
 	}); err != nil {
 		return err
 	}
@@ -343,8 +370,18 @@ func (h hostRecovery) Repair(ctx context.Context) error {
 }
 
 func RunWatchdog(ctx context.Context, args []string, out, diagnostic io.Writer) int {
+	profile := standardRecoveryProfile
+	if len(args) > 0 && args[0] != "status" {
+		var ok bool
+		profile, ok = installedRecoveryProfile(args[0])
+		if !ok {
+			fmt.Fprintln(diagnostic, "unknown installed recovery profile")
+			return 2
+		}
+		args = args[1:]
+	}
 	if len(args) == 1 && args[0] == "status" {
-		if err := json.NewEncoder(out).Encode(watchdog.ReadNotice(watchdogStateDir)); err != nil {
+		if err := json.NewEncoder(out).Encode(watchdog.ReadNotice(profile.state)); err != nil {
 			return 1
 		}
 		return 0
@@ -353,7 +390,7 @@ func RunWatchdog(ctx context.Context, args []string, out, diagnostic io.Writer) 
 		fmt.Fprintln(diagnostic, "recovery-watchdog requires root; use the status argument to read a notice")
 		return 2
 	}
-	raw, err := macRead(macPath("", watchdogConfigPath), 0600, 256<<10)
+	raw, err := macRead(macPath("", profile.config), 0600, 256<<10)
 	var config watchdogConfig
 	if err != nil || json.Unmarshal(raw, &config) != nil || config.Build <= 0 ||
 		(config.Channel != update.ChannelTest && config.Channel != update.ChannelProd) ||
@@ -361,7 +398,7 @@ func RunWatchdog(ctx context.Context, args []string, out, diagnostic io.Writer) 
 		fmt.Fprintln(diagnostic, "recovery watchdog configuration unavailable")
 		return 1
 	}
-	unlock, err := update.LockProfile(filepath.Join(watchdogStateDir, update.ProfileLockName))
+	unlock, err := update.LockProfile(filepath.Join(profile.state, update.ProfileLockName))
 	if errors.Is(err, update.ErrProfileBusy) {
 		return 0
 	}
@@ -370,10 +407,10 @@ func RunWatchdog(ctx context.Context, args []string, out, diagnostic io.Writer) 
 		return 1
 	}
 	defer unlock()
-	host := hostRecovery{config: config, checkpoint: watchdog.Checkpoint{Dir: watchdogStateDir}, command: rootWatchdogCommand}
+	host := hostRecovery{profile: profile, config: config, checkpoint: watchdog.Checkpoint{Dir: profile.state}, command: rootWatchdogCommand}
 	state, err := host.checkpoint.Load()
 	if err != nil {
-		_ = publishWatchdogNotice(watchdog.Notice{Reason: "state_unavailable", Message: "Host recovery cannot read its checkpoint. Check storage and file permissions."})
+		_ = publishWatchdogNotice(profile.state, watchdog.Notice{Reason: "state_unavailable", Message: "Host recovery cannot read its checkpoint. Check storage and file permissions."})
 		fmt.Fprintln(diagnostic, "recovery watchdog state unreadable:", err)
 		return 1
 	}
@@ -387,10 +424,10 @@ func RunWatchdog(ctx context.Context, args []string, out, diagnostic io.Writer) 
 	case watchdog.RetryExhausted:
 		notice = watchdog.Notice{Reason: "retry_exhausted", Message: "Host recovery exhausted its automatic retries. Check the Host service logs and storage."}
 	case watchdog.Healthy:
-		_ = os.Remove(filepath.Join(watchdogStateDir, watchdog.NoticeFile))
+		_ = os.Remove(filepath.Join(profile.state, watchdog.NoticeFile))
 	}
 	if notice.Reason != "" {
-		if err := publishWatchdogNotice(notice); err != nil {
+		if err := publishWatchdogNotice(profile.state, notice); err != nil {
 			fmt.Fprintln(diagnostic, err)
 			return 1
 		}
@@ -404,10 +441,10 @@ func RunWatchdog(ctx context.Context, args []string, out, diagnostic io.Writer) 
 	return 0
 }
 
-func publishWatchdogNotice(notice watchdog.Notice) error {
+func publishWatchdogNotice(state string, notice watchdog.Notice) error {
 	raw, err := json.Marshal(notice)
 	if err != nil {
 		return err
 	}
-	return installWatchdogFile(filepath.Join(watchdogStateDir, watchdog.NoticeFile), raw, 0600)
+	return installWatchdogFile(filepath.Join(state, watchdog.NoticeFile), raw, 0600)
 }

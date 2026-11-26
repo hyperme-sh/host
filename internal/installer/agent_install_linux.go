@@ -317,7 +317,7 @@ func RunInstallAgent(ctx context.Context,args []string,out,diagnostic io.Writer)
 	if err==nil {err=secureSetupDirectory("/var/lib/hypermesh",false)}
 	if err==nil {err=installAgentFiles(ctx,"",agentPayloads(p,binary),resume,&j,save)}
 	if err == nil {
-		err = installWatchdog(ctx, p.ReleaseURL, p.Channel, int(meta.Build), digestSetupBytes(binary),
+		err = installWatchdog(ctx, standardRecoveryProfile, p.ReleaseURL, p.Channel, int(meta.Build), digestSetupBytes(binary),
 			[]byte(p.PublicKey), p.Fingerprints)
 	}
 	if err!=nil {j.State="failed";j.Error=err.Error();if saveErr:=save(j);saveErr!=nil{fmt.Fprintln(diagnostic,"cannot persist failure journal")}}

@@ -68,3 +68,6 @@ root-managed MacGPG2 package or system GnuPG and excludes Homebrew.
 Terminal recovery notices appear in the local owner console and service
 logs. To read the notice while the agent is down, run
 `sudo /usr/local/libexec/hypermesh-recovery recovery-watchdog status`.
+
+Linux TEST profile installers create separate watchdog timers and executables
+for the Halo and forum profiles. Each timer targets only its installed agent.
