@@ -3,6 +3,7 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/FyberLabs/hypermesh-host/internal/agent"
+	"github.com/FyberLabs/hypermesh-host/internal/hostregistration"
 )
 
 func automaticNativeInputs() (registration, model, binary string, err error) {
@@ -68,29 +70,6 @@ func RunAutomaticNative(ctx context.Context, cfg agent.Config, state agent.State
 	if err := macDirectory(dir, true, true); err != nil {
 		return err
 	}
-	prefix := filepath.Join(dir, "run-"+strings.TrimPrefix(shape, "sha256:")+"-")
-	matches, err := filepath.Glob(prefix + "*.json")
-	if err != nil {
-		return err
-	}
-	path := prefix + time.Now().UTC().Format("20060102T150405.000000000") + ".json"
-	for i := len(matches) - 1; i >= 0; i-- {
-		if strings.HasSuffix(matches[i], ".evidence.json") || strings.HasSuffix(matches[i], ".result.json") {
-			continue
-		}
-		raw, err := nativeRead(matches[i])
-		if err != nil {
-			return err
-		}
-		var existing nativePlan
-		if err := macDecode(raw, &existing); err != nil {
-			return err
-		}
-		if existing.RegistrationSHA == registration && (existing.Run == nil || existing.Run.ExpiresAt.After(time.Now())) {
-			path = matches[i]
-		}
-		break
-	}
 	ctx = context.WithValue(ctx, automaticNativeKey{}, automaticNative{device: state.DeviceID, tenant: cfg.TenantID, shape: shape})
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Minute)
 	defer cancel()
@@ -98,9 +77,24 @@ func RunAutomaticNative(ctx context.Context, cfg agent.Config, state agent.State
 	if nativeAutomaticHalo {
 		protocol = []string{"--halo-test"}
 	}
+	path, err := automaticNativePlanPath(dir, shape, registration, false)
+	if err != nil {
+		return err
+	}
+	var diagnostic bytes.Buffer
 	planArgs := append(append([]string{}, protocol...), "--registration-plan-sha", registration, "--plan", path)
-	if RunPlanCertification(ctx, planArgs, io.Discard, io.Discard) != 0 {
-		return fmt.Errorf("automatic native planning failed")
+	if RunPlanCertification(ctx, planArgs, io.Discard, &diagnostic) != 0 {
+		if strings.TrimSpace(diagnostic.String()) != hostregistration.ErrNativeBenchmarkRequired.Error() {
+			return fmt.Errorf("automatic native planning failed")
+		}
+		path, err = automaticNativePlanPath(dir, shape, registration, true)
+		if err != nil {
+			return err
+		}
+		referenceArgs := append(append([]string{}, protocol...), "--registration-plan-sha", registration, "--plan", path, "--first-reference")
+		if RunPlanCertification(ctx, referenceArgs, io.Discard, io.Discard) != 0 {
+			return fmt.Errorf("automatic native first benchmark planning failed")
+		}
 	}
 	raw, err := nativeRead(path)
 	if err != nil {
@@ -121,4 +115,34 @@ func RunAutomaticNative(ctx context.Context, cfg agent.Config, state agent.State
 		return fmt.Errorf("automatic native measurements or result submission failed")
 	}
 	return nil
+}
+
+func automaticNativePlanPath(dir, shape, registration string, firstReference bool) (string, error) {
+	prefix := filepath.Join(dir, "run-"+strings.TrimPrefix(shape, "sha256:")+"-")
+	if firstReference {
+		prefix = filepath.Join(dir, "reference-"+strings.TrimPrefix(shape, "sha256:")+"-")
+	}
+	matches, err := filepath.Glob(prefix + "*.json")
+	if err != nil {
+		return "", err
+	}
+	path := prefix + time.Now().UTC().Format("20060102T150405.000000000") + ".json"
+	for i := len(matches) - 1; i >= 0; i-- {
+		if strings.HasSuffix(matches[i], ".evidence.json") || strings.HasSuffix(matches[i], ".result.json") {
+			continue
+		}
+		raw, err := nativeRead(matches[i])
+		if err != nil {
+			return "", err
+		}
+		var existing nativePlan
+		if err := macDecode(raw, &existing); err != nil {
+			return "", err
+		}
+		if existing.RegistrationSHA == registration && (existing.Run == nil || existing.Run.ExpiresAt.After(time.Now())) {
+			path = matches[i]
+		}
+		break
+	}
+	return path, nil
 }

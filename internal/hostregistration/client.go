@@ -106,6 +106,9 @@ func (c *Client) request(ctx context.Context,method,path,token string,body,dest 
  }
  return errMachineTokenRejected
 }
+// ErrNativeBenchmarkRequired requests the separately bound first-reference plan.
+var ErrNativeBenchmarkRequired = errors.New("native benchmark reference required")
+
 func (c *Client) requestRaw(ctx context.Context,method,path,token string,body,dest any) error {
  ctx,cancel:=context.WithTimeout(ctx,c.timeout);defer cancel()
  var raw []byte
@@ -122,6 +125,13 @@ func (c *Client) requestRaw(ctx context.Context,method,path,token string,body,de
  if err!=nil{return fmt.Errorf("registration transport failed or timed out; rerun to recover")}
  defer resp.Body.Close()
  if resp.StatusCode<200 || resp.StatusCode>=300 {
+  if resp.StatusCode==409 && path=="/api/v1/hypermesh/agent/onboarding/native-certification/plan" {
+   var conflict struct { Detail string `json:"detail"` }
+   if json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&conflict)==nil && conflict.Detail=="Native benchmark reference required" {
+    return ErrNativeBenchmarkRequired
+   }
+  }
+
   action:="request failed; retry the same command after checking the plane"
   switch resp.StatusCode {
   case 401:action="session expired or invalid; rerun and sign in again"

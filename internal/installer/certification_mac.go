@@ -197,7 +197,15 @@ func runNativeCertification(ctx context.Context, args []string, out, diagnostic 
 				}
 				plan = scheduler.PlanAutomaticNativeCertification
 			}
-			if p.FirstReference {
+			if p.FirstReference && managed {
+				referenceClient, ok := client.(interface {
+					PlanAutomaticNativeReference(context.Context, hostregistration.Request, string, string, string, string, string) (hostregistration.NativeRun, error)
+				})
+				if !ok {
+					return fail(fmt.Errorf("automatic native reference planning unavailable"))
+				}
+				plan = referenceClient.PlanAutomaticNativeReference
+			} else if p.FirstReference {
 				referenceClient, ok := client.(interface {
 					PlanNativeReference(context.Context, hostregistration.Request, string, string, string, string, string) (hostregistration.NativeRun, error)
 				})

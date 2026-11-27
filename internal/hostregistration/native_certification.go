@@ -169,6 +169,9 @@ func (c *Client) PlanNativeCertification(ctx context.Context, r Request, device,
 func (c *Client) PlanAutomaticNativeCertification(ctx context.Context, r Request, device, secret, id, environment, hardware string) (NativeRun, error) {
 	return c.nativeCertification(ctx, r, device, secret, id, environment, hardware, nil, nil, false, true)
 }
+func (c *Client) PlanAutomaticNativeReference(ctx context.Context, r Request, device, secret, id, environment, hardware string) (NativeRun, error) {
+	return c.nativeCertification(ctx, r, device, secret, id, environment, hardware, nil, nil, true, true)
+}
 func (c *Client) PlanNativeReference(ctx context.Context, r Request, device, secret, id, environment, hardware string) (NativeRun, error) {
 	return c.nativeCertification(ctx, r, device, secret, id, environment, hardware, nil, nil, true, false)
 }
