@@ -3,6 +3,7 @@ package hostregistration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,9 +84,10 @@ func TestNativeFirstReferencePlanBinding(t *testing.T) {
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				var body struct {
 					FirstReference bool   `json:"first_reference"`
+					Automatic      bool   `json:"automatic"`
 					Nonce          string `json:"nonce"`
 				}
-				if err := json.NewDecoder(req.Body).Decode(&body); err != nil || !body.FirstReference || !strings.HasSuffix(req.URL.Path, "/plan") {
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil || !body.FirstReference || !body.Automatic || !strings.HasSuffix(req.URL.Path, "/plan") {
 					t.Error("first-reference planning request omitted its purpose")
 					w.WriteHeader(http.StatusBadRequest)
 					return
@@ -100,7 +102,7 @@ func TestNativeFirstReferencePlanBinding(t *testing.T) {
 			defer server.Close()
 			client, _ := New(server.URL, testTenant)
 			client.http = server.Client()
-			_, err := client.PlanNativeReference(context.Background(), r, r.RequestID,
+			_, err := client.PlanAutomaticNativeReference(context.Background(), r, r.RequestID,
 				"hm_dev_"+strings.Repeat("s", 32), id, manifest.EnvironmentHash, manifest.Hardware)
 			if (err == nil) != (purpose == NativeReferencePurpose) {
 				t.Fatalf("purpose %s: %v", purpose, err)
@@ -143,6 +145,28 @@ func TestNativeVulkanManifestBindsHardwareClassAndDevice(t *testing.T) {
 			wrong.HardwareClassID = "amd-ryzen-ai-max-395"
 			if wrong.Validate() == nil {
 				t.Fatal("accepted mismatched Halo classes")
+			}
+		})
+	}
+}
+
+func TestAutomaticBenchmarkRequiresExplicitMissingReference(t *testing.T) {
+	for _, detail := range []string{"Native benchmark reference required", "Existing native benchmark reference is unverified", "Wait for the active lease"} {
+		t.Run(detail, func(t *testing.T) {
+			r := fixture(t)
+			r.ClassID = "darwin-arm64-lab"
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]string{"detail": detail})
+			}))
+			defer server.Close()
+			client, _ := New(server.URL, testTenant)
+			client.http = server.Client()
+			id, _ := NewRunID()
+			_, err := client.PlanAutomaticNativeCertification(context.Background(), r, r.RequestID,
+				"hm_dev_"+strings.Repeat("s", 32), id, "sha256:"+strings.Repeat("e", 64), strings.Repeat("f", 64))
+			if errors.Is(err, ErrNativeBenchmarkRequired) != (detail == "Native benchmark reference required") {
+				t.Fatalf("unexpected benchmark fallback for %q: %v", detail, err)
 			}
 		})
 	}

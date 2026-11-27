@@ -817,7 +817,7 @@ func (a *Agent) pullAndRun(ctx context.Context) error {
 		hb.DeviceID == a.state.DeviceID && hb.NativeCertificationDue &&
 		strings.HasPrefix(hb.HardwareShapeSignature, "sha256:") && len(hb.HardwareShapeSignature) == 71 &&
 		time.Since(hb.AcceptedAt) >= 0 && time.Since(hb.AcceptedAt) <= 2*time.Minute &&
-		(posture.SellState == api.SellPaused || posture.SellState == api.SellNA || rebootHeld(a.rebootHealth())) &&
+		(posture.SellState == api.SellPaused || posture.SellState == api.SellNA || posture.SellState == api.SellSelling || rebootHeld(a.rebootHealth())) &&
 		a.currentLease() == nil && !a.pendingResult.Load() {
 		a.maintenanceMu.Lock()
 		if !a.maintenanceHeld() && time.Now().After(a.nativeRetryAfter) {
